@@ -36,12 +36,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    const principal: Omit<AuthPrincipal, 'expiresAt'> = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    };
-    const token = jwt.sign({ sub: String(user.id) }, requireJwtSecret(), {
+    return this.issueSession({ id: user.id, email: user.email, role: user.role });
+  }
+
+  /** Signs a fresh short-lived session. Used at login and to slide an active session forward. */
+  issueSession(principal: Omit<AuthPrincipal, 'expiresAt'>): { token: string; user: AuthPrincipal } {
+    const token = jwt.sign({ sub: String(principal.id) }, requireJwtSecret(), {
       algorithm: 'HS256',
       issuer: AUTH_JWT_ISSUER,
       audience: AUTH_JWT_AUDIENCE,
@@ -52,7 +52,12 @@ export class AuthService {
 
     return {
       token,
-      user: { ...principal, expiresAt: new Date(expiration * 1000).toISOString() },
+      user: {
+        id: principal.id,
+        email: principal.email,
+        role: principal.role,
+        expiresAt: new Date(expiration * 1000).toISOString(),
+      },
     };
   }
 }

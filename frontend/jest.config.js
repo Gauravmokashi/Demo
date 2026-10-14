@@ -5,5 +5,5 @@ const createJestConfig = nextJest({ dir: './' });
 module.exports = createJestConfig({
   clearMocks: true,
   testEnvironment: 'jsdom',
-  testMatch: ['<rootDir>/app/**/*.test.tsx'],
+  testMatch: ['<rootDir>/{app,components}/**/*.test.tsx'],
 });

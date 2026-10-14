@@ -14,6 +14,14 @@ enum Currency {
   INR
 }
 
+enum JobLevel {
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+  PRINCIPAL
+}
+
 enum UserRole {
   HR_MANAGER
   EMPLOYEE
@@ -36,6 +44,9 @@ model Employee {
   fullName      String          @db.VarChar(160)
   department    String          @db.VarChar(100)
   country       String          @db.VarChar(100)
+  jobTitle      String          @db.VarChar(120)
+  level         JobLevel
+  hireDate      DateTime        @db.Date
   currency      Currency
   salary        Decimal         @db.Decimal(14, 2)
   effectiveDate DateTime        @db.Date
@@ -47,6 +58,7 @@ model Employee {
   @@index([country, department])
   @@index([currency, salary])
   @@index([fullName])
+  @@index([level])
 }
 
 model SalaryHistory {
@@ -70,6 +82,7 @@ model SalaryChangeAudit {
   previousCurrency  Currency
   newCurrency       Currency
   effectiveDate     DateTime @db.Date
+  reason            String   @db.VarChar(500)
   changedAt         DateTime @default(now())
   actor             User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
   employee          Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)

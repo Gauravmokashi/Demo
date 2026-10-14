@@ -1,66 +1,82 @@
-# ACME Salary Management System
+# ACME Salary Management
 
-This workspace contains a production-minded salary management monorepo for multinational payroll operations.
+Web app for an HR manager to manage salaries for 10,000 employees across 10 countries and 4 currencies,
+and to answer "how do we pay people?" without spreadsheets.
 
-- NestJS backend with employee, payroll, and dashboard APIs
-- Next.js dashboard for salary review and country-level HR monitoring
-- Employee and payroll aggregation logic built around multi-currency totals
-- HR-manager login with short-lived JWT cookie authentication and salary-change audit records
+- **Directory** — server-side search, filters (country, department, level, currency, salary range), sorting, pagination, CSV export of exactly what is filtered.
+- **Salary changes** — effective date + required reason, live % change, confirmation above 20%, atomic history + audit record.
+- **Employee history** — who changed what, when and why; full salary timeline.
+- **Pay insights** — median, middle 50% and range by country, department or level; never mixes currencies.
 
-## Project structure
+| Read this | For |
+|---|---|
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Goal, scope, and what is deliberately left out |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture, trade-offs, performance, testing strategy |
+| [docs/PROCESS.md](docs/PROCESS.md) | How the solution evolved |
+| [docs/AI_USAGE.md](docs/AI_USAGE.md) | How AI tools were used and checked |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deploying API, frontend and database |
 
-- `backend/` — NestJS API and test suite
-- `frontend/` — Next.js dashboard UI
+**Stack:** NestJS 10 · Prisma 6 · PostgreSQL 16 · Next.js 16 · React 19 · Radix UI · Tailwind · Jest.
 
-## Quick start
+## Run locally
 
-```powershell
+Prerequisites: Node 20+, npm, Docker (for PostgreSQL).
+
+```bash
 npm install --legacy-peer-deps
 docker compose up -d postgres
-if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
-$env:NODE_ENV = 'development'
-npm run db:setup
+cp backend/.env.example backend/.env    # then set JWT_SECRET, INITIAL_HR_EMAIL, INITIAL_HR_PASSWORD
+npm run db:setup                        # migrations + 10,000 seeded employees
 npm run auth:bootstrap --workspace backend
 npm run dev
 ```
 
-The frontend is served at `http://localhost:3000`; the NestJS API is at `http://localhost:4000/api`. The seed command adds 10,000 deterministic employees and skips existing employee codes, so it is safe to rerun.
+On Windows PowerShell use `Copy-Item backend/.env.example backend/.env`.
 
-Before bootstrap, set `JWT_SECRET`, `CORS_ORIGINS`, `INITIAL_HR_EMAIL`, and `INITIAL_HR_PASSWORD` in `backend/.env`. Use a unique `JWT_SECRET` of at least 32 bytes. The bootstrap command requires `NODE_ENV=development`, hashes the password, and never overwrites an existing account. Sign-in stores a short-lived JWT in an HttpOnly, SameSite=Strict cookie; it is Secure when `NODE_ENV=production`.
+Generate a `JWT_SECRET` with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
+`backend/.env.example` sets `NODE_ENV=development`, which the one-time HR-manager bootstrap requires.
 
-To run the services separately, use `npm run start:dev --workspace backend` and `npm run dev --workspace frontend`.
+Open http://localhost:3000 and sign in with the bootstrap credentials. The API runs on
+http://localhost:4000/api; the frontend proxies `/api` to it (`API_PROXY_TARGET`, see `frontend/.env.example`).
 
-## API
+The seed is deterministic (seeded PRNG) and idempotent: rerunning it skips existing employee codes.
 
-- `POST /api/auth/login` — public HR-manager sign-in; sets an HttpOnly session cookie
-- `GET /api/auth/me` — authenticated identity without password hash
-- `POST /api/auth/logout` — clears the session cookie
-- `GET /api/health` — public health response
-- `GET /api/dashboard/summary` — workforce count and salary averages/totals grouped by currency
-- `GET /api/employees` — filtered, server-paginated employee directory
-- `GET /api/employees/analytics` — country and department metrics grouped by currency
-- `GET /api/employees/export` — CSV export using the active filters
-- `GET /api/employees/:id` — employee details
-- `PATCH /api/employees/:id/salary` — validated salary update with salary-history entry
+## Test
 
-Employee salaries use PostgreSQL `DECIMAL(14,2)`. Payroll totals and average salaries are never combined across currencies.
-
-All employee, dashboard, analytics, and export routes require an active HR-manager identity. Salary changes also create an actor-attributed audit record in the same database transaction as the salary update and history row. Apply the additive auth/audit migration with `npm run db:migrate --workspace backend`; do not reset a database containing other applications.
-
-CSV export prefixes formula-leading values (`=`, `+`, `-`, `@`), including values preceded by whitespace/control characters, to reduce spreadsheet formula injection risk.
-
-## Verification
-
-```powershell
+```bash
 npm run lint
-npm test
+npm test          # backend unit + HTTP tests, seed-generator tests, frontend component tests
 npm run build
 ```
 
-GitHub Actions runs these checks on pull requests and pushes to `main`. It does not deploy the application.
+Integration tests run against a real, migrated PostgreSQL database (CI does this on every push). Use a
+disposable database — the tests truncate tables:
 
-## Notes
+```bash
+docker compose exec postgres createdb -U salary_app salary_test
+DATABASE_URL="postgresql://salary_app:salary_app@localhost:5432/salary_test?schema=public" npm run db:deploy --workspace backend
+DATABASE_URL="postgresql://salary_app:salary_app@localhost:5432/salary_test?schema=public" npm run test:int --workspace backend
+```
 
-- Copy `backend/.env.example` to `backend/.env` and configure `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, and initial-manager values for local setup.
-- The local compose file uses development credentials. Rate limiting, CSRF tokens/Origin enforcement, password reset, and production secret management are not implemented; do not expose this demo directly to the public internet.
-- The frontend reads `NEXT_PUBLIC_API_URL` when set, defaulting to `http://localhost:4000/api`.
+## API
+
+All routes are under `/api`. Only `health`, `auth/login` and `auth/logout` are public; everything else needs an
+HR-manager session cookie.
+
+| Route | Purpose |
+|---|---|
+| `POST auth/login` · `POST auth/refresh` · `POST auth/logout` · `GET auth/me` | Session (15-min HttpOnly cookie, refreshed while active) |
+| `GET health` | Readiness; 503 when the database is unreachable |
+| `GET dashboard/summary` | Headcount, payroll and average per currency, countries, departments, levels |
+| `GET employees` | `page, limit, search, country, department, level, currency, minSalary, maxSalary, sortBy, sortOrder` (salary bounds/sort need `currency`) |
+| `GET employees/export` | CSV of every row matching the same filters |
+| `GET employees/analytics` | `dimension=country\|department\|level`, optional `country, department, currency` → count, min, P25, median, P75, max, average, total per group and currency |
+| `GET employees/:id` · `GET employees/:id/history` | Employee, salary timeline and attributed changes |
+| `PATCH employees/:id/salary` | `{ salary, effectiveDate: "YYYY-MM-DD", reason, confirmLargeChange? }` |
+
+Invalid input returns 400 with a message (including database range errors), never a 500.
+
+## Security notes
+Passwords are bcrypt-hashed; sessions are short-lived HS256 JWTs in HttpOnly, SameSite=Strict cookies; every
+request re-checks the user is an active HR manager. CSV export neutralises spreadsheet formulas. Not yet
+implemented (needed before real data): rate limiting, SSO/password reset, server-side session revocation.

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { authCookieClearOptions, authCookieOptions, AUTH_COOKIE_NAME } from './auth.constants';
@@ -25,6 +25,16 @@ export class AuthController {
   @Get('me')
   getIdentity(@CurrentUser() user: AuthPrincipal) {
     return { user };
+  }
+
+  // Slides the session forward for an active user. Requires a still-valid session, so an idle
+  // user is signed out when the 15-minute token expires.
+  @Post('refresh')
+  @HttpCode(200)
+  refresh(@CurrentUser() user: AuthPrincipal, @Res({ passthrough: true }) response: Response) {
+    const result = this.authService.issueSession(user);
+    response.cookie(AUTH_COOKIE_NAME, result.token, authCookieOptions());
+    return { user: result.user };
   }
 
   @Public()

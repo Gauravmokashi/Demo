@@ -33,10 +33,14 @@ const employeeRecord = {
   fullName: 'Sample Employee',
   department: 'Engineering',
   country: 'India',
+  jobTitle: 'Software Engineer',
+  level: 'MID',
+  hireDate: new Date('2022-03-01T00:00:00.000Z'),
   currency: Currency.INR,
   salary: new Prisma.Decimal('100000.00'),
   effectiveDate: new Date('2025-01-01T00:00:00.000Z'),
 };
+const salaryChange = { salary: 110000, effectiveDate: '2025-02-01', reason: 'Annual review' };
 
 let app: INestApplication;
 let moduleRef: TestingModule;
@@ -73,8 +77,8 @@ beforeAll(async () => {
       }),
     },
     employee: {
-      count: jest.fn(async () => 0),
-      findMany: jest.fn(async () => []),
+      count: jest.fn(async (): Promise<number> => 0),
+      findMany: jest.fn(async (): Promise<unknown[]> => []),
       findUnique: jest.fn(async () => employeeRecord),
       groupBy: jest.fn(async () => []),
     },
@@ -105,6 +109,16 @@ afterAll(async () => app.close());
 beforeEach(() => {
   auditCreate.mockClear();
 });
+
+// Resolve the cookie before building the next request: supertest closes the shared server
+// when a request finishes, which would break a request that is already being built.
+async function loginCookie(): Promise<string> {
+  const response = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email: manager.email, password: managerPassword })
+    .expect(201);
+  return response.headers['set-cookie'][0].split(';')[0];
+}
 
 describe('HR-manager authentication and authorization', () => {
   it('logs in and returns a safe identity with an HttpOnly cookie', async () => {
@@ -195,7 +209,7 @@ describe('HR-manager authentication and authorization', () => {
     await request(app.getHttpServer())
       .patch(`/api/employees/${employeeRecord.id}/salary`)
       .set('Cookie', cookie)
-      .send({ salary: 110000, currency: 'INR', effectiveDate: '2025-02-01' })
+      .send(salaryChange)
       .expect(200);
 
     expect(auditCreate).toHaveBeenCalledWith({
@@ -207,7 +221,93 @@ describe('HR-manager authentication and authorization', () => {
         previousCurrency: Currency.INR,
         newCurrency: Currency.INR,
         effectiveDate: new Date('2025-02-01T00:00:00.000Z'),
+        reason: 'Annual review',
       }),
     });
+  });
+
+  it('slides an active session forward with a fresh cookie', async () => {
+    const cookie = await loginCookie();
+    const response = await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.body.user).toMatchObject({ id: manager.id, email: manager.email });
+    expect(response.headers['set-cookie'][0]).toContain(`${AUTH_COOKIE_NAME}=`);
+    await request(app.getHttpServer()).post('/api/auth/refresh').expect(401);
+  });
+});
+
+describe('CSV export', () => {
+  it('returns the CSV body, not a serialized promise', async () => {
+    prisma.employee.findMany.mockResolvedValueOnce([employeeRecord]);
+    const cookie = await loginCookie();
+
+    const response = await request(app.getHttpServer())
+      .get('/api/employees/export?currency=INR')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.headers['content-type']).toContain('text/csv');
+    expect(response.headers['content-disposition']).toMatch(/attachment; filename="employees-\d{4}-\d{2}-\d{2}\.csv"/);
+    const lines = response.text.split('\n');
+    expect(lines[0]).toBe(
+      'id,employeeCode,fullName,jobTitle,level,department,country,hireDate,currency,salary,effectiveDate',
+    );
+    expect(lines[1]).toContain('"ACM-00007"');
+    expect(lines[1]).toContain('"100000"');
+  });
+
+  it('validates export filters instead of failing in the database', async () => {
+    const cookie = await loginCookie();
+    await request(app.getHttpServer())
+      .get('/api/employees/export?currency=XYZ')
+      .set('Cookie', cookie)
+      .expect(400);
+  });
+});
+
+describe('request validation', () => {
+  it.each([
+    ['a timestamp instead of a date', { ...salaryChange, effectiveDate: '2025-02-01T10:00:00Z' }],
+    ['an impossible date', { ...salaryChange, effectiveDate: '2025-02-30' }],
+    ['a salary above the business ceiling', { ...salaryChange, salary: 1e13 }],
+    ['a missing reason', { salary: 110000, effectiveDate: '2025-02-01' }],
+    ['a currency change', { ...salaryChange, currency: 'USD' }],
+  ])('rejects a salary update with %s', async (_label, body) => {
+    const cookie = await loginCookie();
+    await request(app.getHttpServer())
+      .patch(`/api/employees/${employeeRecord.id}/salary`)
+      .set('Cookie', cookie)
+      .send(body)
+      .expect(400);
+  });
+
+  it.each([
+    ['salary bounds without a currency', 'minSalary=1000'],
+    ['an inverted salary range', 'currency=USD&minSalary=5000&maxSalary=1000'],
+    ['salary sorting without a currency', 'sortBy=salary'],
+    ['an unknown sort column', 'sortBy=passwordHash'],
+  ])('rejects a directory query with %s', async (_label, query) => {
+    const cookie = await loginCookie();
+    await request(app.getHttpServer())
+      .get(`/api/employees?${query}`)
+      .set('Cookie', cookie)
+      .expect(400);
+  });
+
+  it('maps database input errors to 4xx instead of 500', async () => {
+    prisma.employee.count.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('value too long', { code: 'P2000', clientVersion: 'test' }),
+    );
+
+    const cookie = await loginCookie();
+
+    const response = await request(app.getHttpServer())
+      .get('/api/employees')
+      .set('Cookie', cookie)
+      .expect(400);
+    expect(response.body.message).toBe('A value is too long or out of range.');
   });
 });

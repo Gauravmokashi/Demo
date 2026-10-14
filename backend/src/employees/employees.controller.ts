@@ -9,10 +9,11 @@ import {
   Res,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { Response } from 'express';
 import { Roles } from '../auth/auth.decorators';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthPrincipal } from '../auth/auth.types';
-import { EmployeeQueryDto } from './employee-query.dto';
+import { AnalyticsQueryDto, EmployeeQueryDto } from './employee-query.dto';
 import { UpdateSalaryDto } from './salary-update.dto';
 import { EmployeesService } from './employees.service';
 
@@ -27,33 +28,29 @@ export class EmployeesController {
   }
 
   @Get('analytics')
-  getAnalytics() {
-    return this.employeesService.getAnalytics();
+  getAnalytics(@Query() query: AnalyticsQueryDto) {
+    return this.employeesService.getAnalytics(query);
   }
 
+  // Uses the same validated filters as the directory; pagination params are ignored so the
+  // export contains every matching row.
   @Get('export')
-  exportCsv(
-    @Query('search') search?: string,
-    @Query('country') country?: string,
-    @Query('department') department?: string,
-    @Query('currency') currency?: string,
-    @Res() res?: any,
-  ) {
-    const csv = this.employeesService.exportCsv(search, country, department, currency);
-
-    if (res) {
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename="employees.csv"');
-      res.send(csv);
-      return;
-    }
-
-    return csv;
+  async exportCsv(@Query() query: EmployeeQueryDto, @Res() res: Response) {
+    const csv = await this.employeesService.exportCsv(query);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="employees-${date}.csv"`);
+    res.send(csv);
   }
 
   @Get(':id')
   getEmployee(@Param('id', ParseIntPipe) id: number) {
     return this.employeesService.findById(id);
+  }
+
+  @Get(':id/history')
+  getHistory(@Param('id', ParseIntPipe) id: number) {
+    return this.employeesService.getHistory(id);
   }
 
   @Patch(':id/salary')

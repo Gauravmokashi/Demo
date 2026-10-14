@@ -1,85 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import HomePage from './page';
-
-type TestUser = {
-  id: number;
-  email: string;
-  role: 'HR_MANAGER';
-  expiresAt: string;
-};
-
-const manager: TestUser = {
-  id: 1,
-  email: 'manager@example.test',
-  role: 'HR_MANAGER',
-  expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-};
-const employee = {
-  id: 7,
-  employeeId: 'ACM-00007',
-  fullName: 'Maya Patel',
-  department: 'Engineering',
-  country: 'India',
-  currency: 'INR',
-  salary: 1800000,
-  effectiveDate: '2025-01-01',
-};
-const summary = {
-  totalEmployees: 1,
-  averageSalaryByCurrency: [{ currency: 'INR', average: 1800000 }],
-  payrollByCurrency: [{ currency: 'INR', total: 1800000, employeeCount: 1 }],
-  countries: [{ country: 'India', count: 1 }],
-  departments: [{ department: 'Engineering', count: 1 }],
-};
-
-const fetchMock = jest.fn<typeof fetch>();
-
-type FetchOptions = {
-  sessionStatus?: number;
-  sessionUser?: TestUser;
-  dashboardStatus?: number;
-  employeeStatus?: number;
-};
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-    blob: async () => new Blob(['csv']),
-  } as Response;
-}
-
-function installFetch(options: FetchOptions = {}) {
-  fetchMock.mockImplementation(async (input, init) => {
-    const url = new URL(String(input), 'http://localhost');
-    const method = init?.method ?? 'GET';
-
-    if (url.pathname.endsWith('/auth/me')) {
-      return jsonResponse(
-        options.sessionUser ? { user: options.sessionUser } : null,
-        options.sessionStatus ?? (options.sessionUser ? 200 : 401),
-      );
-    }
-    if (url.pathname.endsWith('/auth/login')) return jsonResponse({ user: manager }, 201);
-    if (url.pathname.endsWith('/auth/logout')) return jsonResponse({ message: 'Logged out.' }, 201);
-    if (url.pathname.endsWith('/dashboard/summary')) {
-      return jsonResponse(summary, options.dashboardStatus ?? 200);
-    }
-    if (url.pathname.endsWith('/employees/export')) return jsonResponse('csv', 200);
-    if (url.pathname.endsWith('/employees/7/salary') && method === 'PATCH') {
-      return jsonResponse(employee, 200);
-    }
-    if (url.pathname.endsWith('/employees')) {
-      const page = Number(url.searchParams.get('page') ?? 1);
-      return jsonResponse({ data: [employee], page, limit: 10, total: 21, totalPages: 3 }, options.employeeStatus ?? 200);
-    }
-    return jsonResponse({}, 404);
-  });
-  global.fetch = fetchMock;
-}
+import { fetchMock, findCall, installFetch, manager } from '../test/fixtures';
 
 async function renderAuthenticated(user = userEvent.setup()) {
   installFetch({ sessionUser: manager });
@@ -96,7 +19,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe('HR salary dashboard authentication and workflows', () => {
+describe('HR salary dashboard', () => {
   it('logs in before rendering protected employee data and supports logout', async () => {
     const user = userEvent.setup();
     installFetch();
@@ -111,61 +34,77 @@ describe('HR salary dashboard authentication and workflows', () => {
     await screen.findByText('Maya Patel');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/\/auth\/login$/),
+      expect.stringMatching(/\/api\/auth\/login$/),
       expect.objectContaining({ method: 'POST', credentials: 'include' }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/\/employees\?/),
-      expect.objectContaining({ credentials: 'include' }),
     );
 
     await user.click(screen.getByRole('button', { name: /sign out/i }));
     await screen.findByRole('heading', { name: 'HR manager sign in' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/\/auth\/logout$/),
-      expect.objectContaining({ method: 'POST', credentials: 'include' }),
-    );
+    expect(findCall((url, init) => url.pathname.endsWith('/auth/logout') && init?.method === 'POST')).toBeTruthy();
     expect(screen.queryByText('Maya Patel')).toBeNull();
   });
 
   it('rejects an already-expired restored session before requesting dashboard data', async () => {
-    const expiredUser = { ...manager, expiresAt: new Date(Date.now() - 1000).toISOString() };
-    installFetch({ sessionUser: expiredUser });
+    installFetch({ sessionUser: { ...manager, expiresAt: new Date(Date.now() - 1000).toISOString() } });
     render(<HomePage />);
 
     await screen.findByRole('heading', { name: 'HR manager sign in' });
     expect(screen.getByRole('alert').textContent).toMatch(/session has expired/i);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/dashboard/summary'))).toBe(false);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/employees?'))).toBe(false);
+    expect(findCall((url) => url.pathname.endsWith('/dashboard/summary'))).toBeUndefined();
+    expect(findCall((url) => url.pathname.endsWith('/employees'))).toBeUndefined();
   });
 
   it('shows API errors rather than pretending data loaded', async () => {
     installFetch({ sessionUser: manager, dashboardStatus: 503, employeeStatus: 503 });
     render(<HomePage />);
 
-    expect(await screen.findByRole('alert')).toBeTruthy();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/could not be loaded/i));
   });
 
-  it('sends search and directory filters to the API', async () => {
+  it('shows job title and level in the directory', async () => {
+    await renderAuthenticated();
+
+    expect(screen.getByText('Senior Software Engineer')).toBeTruthy();
+  });
+
+  it('sends search, directory filters and salary range to the API', async () => {
     const user = await renderAuthenticated();
 
     fireEvent.change(screen.getByLabelText('Search employees'), { target: { value: 'Patel' } });
     await user.selectOptions(screen.getByLabelText('Filter by country'), 'India');
     await user.selectOptions(screen.getByLabelText('Filter by department'), 'Engineering');
+    await user.selectOptions(screen.getByLabelText('Filter by level'), 'SENIOR');
+    expect((screen.getByLabelText('Minimum salary') as HTMLInputElement).disabled).toBe(true);
     await user.selectOptions(screen.getByLabelText('Filter by currency'), 'INR');
+    await user.type(screen.getByLabelText('Minimum salary'), '1000000');
 
     await waitFor(() => {
-      const matchingCall = fetchMock.mock.calls.find(([input]) => {
-        const url = new URL(String(input), 'http://localhost');
-        return url.pathname.endsWith('/employees') && url.searchParams.has('currency');
+      const call = findCall((url) => url.pathname.endsWith('/employees') && url.searchParams.has('minSalary'));
+      expect(call).toBeTruthy();
+      const url = new URL(String(call?.[0]), 'http://localhost');
+      expect(Object.fromEntries(url.searchParams)).toMatchObject({
+        search: 'Patel',
+        country: 'India',
+        department: 'Engineering',
+        level: 'SENIOR',
+        currency: 'INR',
+        minSalary: '1000000',
+        page: '1',
       });
-      expect(matchingCall).toBeTruthy();
-      const url = new URL(String(matchingCall?.[0]), 'http://localhost');
-      expect(url.searchParams.get('search')).toBe('Patel');
-      expect(url.searchParams.get('country')).toBe('India');
-      expect(url.searchParams.get('department')).toBe('Engineering');
-      expect(url.searchParams.get('currency')).toBe('INR');
+    });
+  });
+
+  it('sorts by salary only once a currency is chosen', async () => {
+    const user = await renderAuthenticated();
+    const salaryHeader = screen.getByRole('button', { name: /annual salary/i });
+    expect((salaryHeader as HTMLButtonElement).disabled).toBe(true);
+
+    await user.selectOptions(screen.getByLabelText('Filter by currency'), 'INR');
+    await user.click(salaryHeader);
+    await user.click(salaryHeader);
+
+    await waitFor(() => {
+      expect(findCall((url) => url.searchParams.get('sortBy') === 'salary' && url.searchParams.get('sortOrder') === 'desc')).toBeTruthy();
     });
   });
 
@@ -175,35 +114,109 @@ describe('HR salary dashboard authentication and workflows', () => {
     await user.click(screen.getByRole('button', { name: 'Next page' }));
 
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => {
-        const url = new URL(String(input), 'http://localhost');
-        return url.pathname.endsWith('/employees') && url.searchParams.get('page') === '2';
-      })).toBe(true);
+      expect(findCall((url) => url.pathname.endsWith('/employees') && url.searchParams.get('page') === '2')).toBeTruthy();
     });
   });
 
-  it('submits salary updates with the current employee and effective date', async () => {
+  it('exports with the active directory filters', async () => {
+    const user = await renderAuthenticated();
+    URL.createObjectURL = () => 'blob:test';
+    URL.revokeObjectURL = () => undefined;
+
+    await user.selectOptions(screen.getByLabelText('Filter by country'), 'India');
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+
+    await waitFor(() => {
+      expect(findCall((url) => url.pathname.endsWith('/employees/export') && url.searchParams.get('country') === 'India')).toBeTruthy();
+    });
+  });
+
+  it('records a salary change with a reason and refreshes the data', async () => {
+    const user = await renderAuthenticated();
+    const directoryCallsBefore = fetchMock.mock.calls.filter(([input]) => String(input).includes('/employees?')).length;
+
+    await user.click(screen.getByRole('button', { name: 'Edit salary for Maya Patel' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Annual salary'));
+    await user.type(within(dialog).getByLabelText('Annual salary'), '1900000');
+    expect(within(dialog).getByText('+5.6%')).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText('Effective date'), { target: { value: '2025-03-01' } });
+    await user.type(within(dialog).getByLabelText('Reason for change'), 'Annual review');
+    await user.click(within(dialog).getByRole('button', { name: 'Save change' }));
+
+    await screen.findByText('Salary updated for Maya Patel.');
+    const update = findCall((url, init) => url.pathname.endsWith('/employees/7/salary') && init?.method === 'PATCH');
+    expect(JSON.parse(String(update?.[1]?.body))).toEqual({
+      salary: 1900000,
+      effectiveDate: '2025-03-01',
+      reason: 'Annual review',
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/employees?')).length).toBeGreaterThan(directoryCallsBefore);
+    });
+  });
+
+  it('requires explicit confirmation for a large salary change', async () => {
     const user = await renderAuthenticated();
 
     await user.click(screen.getByRole('button', { name: 'Edit salary for Maya Patel' }));
-    await user.clear(screen.getByLabelText('Annual salary'));
-    await user.type(screen.getByLabelText('Annual salary'), '1900000');
-    await user.selectOptions(screen.getByLabelText('Currency'), 'INR');
-    await user.clear(screen.getByLabelText('Effective date'));
-    await user.type(screen.getByLabelText('Effective date'), '2025-03-01');
-    await user.click(screen.getByRole('button', { name: 'Save change' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Annual salary'));
+    await user.type(within(dialog).getByLabelText('Annual salary'), '2700000');
+    expect(within(dialog).getByText(/above the 20% review threshold/)).toBeTruthy();
+    await user.type(within(dialog).getByLabelText('Reason for change'), 'Promotion to Lead');
+    await user.click(within(dialog).getByLabelText('I confirm this large change'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save change' }));
 
     await waitFor(() => {
-      const updateCall = fetchMock.mock.calls.find(([input, init]) =>
-        String(input).endsWith('/employees/7/salary') && init?.method === 'PATCH',
-      );
-      expect(updateCall).toBeTruthy();
-      expect(JSON.parse(String(updateCall?.[1]?.body))).toEqual({
-        salary: 1900000,
-        currency: 'INR',
-        effectiveDate: '2025-03-01',
-      });
-      expect(updateCall?.[1]?.credentials).toBe('include');
+      const update = findCall((url, init) => url.pathname.endsWith('/employees/7/salary') && init?.method === 'PATCH');
+      expect(JSON.parse(String(update?.[1]?.body))).toMatchObject({ salary: 2700000, confirmLargeChange: true });
+    });
+  });
+
+  it('shows the API validation message inside the salary dialog', async () => {
+    const user = userEvent.setup();
+    installFetch({
+      sessionUser: manager,
+      salaryResponse: { status: 400, body: { message: ['Effective date cannot be in the future.'] } },
+    });
+    render(<HomePage />);
+    await screen.findByText('Maya Patel');
+
+    await user.click(screen.getByRole('button', { name: 'Edit salary for Maya Patel' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Reason for change'), 'Annual review');
+    await user.click(within(dialog).getByRole('button', { name: 'Save change' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Effective date cannot be in the future.');
+  });
+
+  it('shows salary history with who changed it and why', async () => {
+    const user = await renderAuthenticated();
+
+    await user.click(screen.getByRole('button', { name: 'Salary history for Maya Patel' }));
+    const panel = await screen.findByRole('dialog');
+
+    expect(await within(panel).findByText('Promotion to Senior')).toBeTruthy();
+    expect(within(panel).getByText(/by manager@example.test/)).toBeTruthy();
+    expect(within(panel).getByText('+12.5%')).toBeTruthy();
+  });
+
+  it('shows pay distribution on the insights tab', async () => {
+    const user = await renderAuthenticated();
+
+    await user.click(screen.getByRole('tab', { name: 'Pay insights' }));
+
+    expect(await screen.findByText(/Paid in INR/)).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Engineering' })).toBeTruthy();
+    await waitFor(() => {
+      const call = findCall((url) => url.pathname.endsWith('/employees/analytics'));
+      expect(new URL(String(call?.[0]), 'http://localhost').searchParams.get('dimension')).toBe('department');
+    });
+
+    await user.selectOptions(screen.getByLabelText('Group by'), 'level');
+    await waitFor(() => {
+      expect(findCall((url) => url.pathname.endsWith('/employees/analytics') && url.searchParams.get('dimension') === 'level')).toBeTruthy();
     });
   });
 });

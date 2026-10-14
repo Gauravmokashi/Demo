@@ -11,6 +11,22 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: salary_test
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d salary_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:5432/salary_test?schema=public'
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,14 +42,21 @@ jobs:
 
       - name: Generate Prisma Client
         run: npm run prisma:generate --workspace backend
-        env:
-          DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:5432/ci?schema=public'
 
       - name: Lint
         run: npm run lint
 
-      - name: Test
+      - name: Unit and component tests
         run: npm test
+
+      - name: Apply migrations to a fresh database
+        run: npm run db:deploy --workspace backend
+
+      - name: Integration tests (real PostgreSQL)
+        run: npm run test:int --workspace backend
+
+      - name: Seed 10,000 employees (smoke test)
+        run: npm run db:seed --workspace backend
 
       - name: Build
         run: npm run build
