@@ -7,7 +7,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "prisma:generate": "prisma generate",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",
