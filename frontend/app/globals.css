@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #f3f5f1;
+  color: #182520;
+  font-family: "Aptos", "Segoe UI", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: #f3f5f1;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+h1,
+h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.section-kicker {
+  color: #52745e;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.filter-control {
+  height: 2.55rem;
+  border: 1px solid #cfd8cf;
+  border-radius: 3px;
+  background: #fff;
+  color: #26382d;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.filter-control:focus {
+  border-color: #477358;
+  box-shadow: 0 0 0 2px rgb(71 115 88 / 16%);
+}
+
+.filter-control::placeholder {
+  color: #7c8980;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  place-items: center;
+  border: 1px solid #d3dbd3;
+  border-radius: 3px;
+  background: #fff;
+  color: #43584a;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: #91aa97;
+  background: #edf3ed;
+}
+
+.icon-button:disabled {
+  color: #aeb8b0;
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 2.4rem;
+  border-radius: 3px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.primary-button {
+  background: #1e4935;
+  color: #fff;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #286144;
+}
+
+.secondary-button {
+  border: 1px solid #cfd8cf;
+  background: #fff;
+  color: #43534a;
+}
+
+.currency-mark {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+}
+
+.currency-usd { background: #397553; }
+.currency-eur { background: #d27b45; }
+.currency-gbp { background: #5477a2; }
+.currency-inr { background: #b75c4d; }
+.currency-bar-0 { background: #397553; }
+.currency-bar-1 { background: #d27b45; }
+.currency-bar-2 { background: #5477a2; }
+.currency-bar-3 { background: #b75c4d; }
+
+@media (max-width: 640px) {
+  .filter-control {
+    min-width: 0;
+    padding-right: 0.5rem;
+    padding-left: 0.65rem;
+  }
+}
