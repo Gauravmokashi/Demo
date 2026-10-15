@@ -1,48 +1,48 @@
-# Requirements — ACME Salary Management
+ACME Salary Management: Requirements
 
-> Written as a one-page product brief. Note: v1 was built before this document existed; it was written
-> during the review pass (see [PROCESS.md](PROCESS.md)) and the scope below is what the current build delivers.
+Persona: HR Manager at ACME (10,000 employees, multiple countries) Status: Written before building; updated as scope decisions changed.
 
-## Goal
-Replace the spreadsheets ACME's HR team uses to manage salaries for **10,000 employees across 10 countries and
-4 currencies** with a web app where an HR manager can (1) find and update any employee's salary safely and
-(2) answer "how do we pay people?" without exporting to Excel.
+1. Goal
 
-## User
-**HR manager** (single persona). Comfortable with spreadsheets, not with SQL. Needs speed for routine
-lookups, confidence that changes are correct and attributable, and quick answers for leadership questions.
+Replace the Excel-based salary process with a web app where the HR manager can maintain salary data and answer questions about how the org pays people, quickly and without spreadsheet gymnastics.
 
-## Questions the product must answer
-1. What does *this person* earn, since when, and who changed it last and why?
-2. What is our payroll and average pay per currency?
-3. How is pay spread within a country / department / level (median, middle 50%, range)?
-4. Who earns within a given band (e.g. USD 100k–150k engineers in the US)?
-5. Can I get this as a file for finance? (CSV export of exactly what I filtered)
+Questions the product must answer in under a minute:
 
-## Scope & features
-| Area | Feature | Why |
-|---|---|---|
-| Directory | Server-side search (name, ID, title, department, country), filters (country, department, level, currency, salary range), sortable columns, pagination | 10k rows is too many for the browser; HR finds people by many attributes |
-| Salary change | Edit salary with effective date and **required reason**; live old→new and % change; >20% changes need explicit confirmation | Prevents typos and makes every change explainable |
-| Integrity | Change, history row and audit row written in one transaction; no back-dating before the current effective date; no future dates | Audit trail must be trustworthy |
-| History | Per-employee panel: current facts, attributed change log, salary timeline | Answers question 1 without a database |
-| Insights | Pay distribution by country / department / level, filterable by country and currency (median, P25–P75, min–max, total) | Answers questions 2–4 |
-| Export | CSV with the directory's filters, formula-injection safe | Finance still lives in spreadsheets |
-| Access | HR-manager sign-in, 15-min sliding session, HttpOnly cookie | Salary data is sensitive |
-
-## Deliberately out of scope (and why)
-- **Currency conversion / org-wide totals in one currency** — FX rates need a source of truth, a date policy and
-  sign-off from finance; showing a converted number that is wrong is worse than showing none. Every figure stays
-  in its own currency.
-- **Scheduled (future-dated) changes** — needs a job to apply them and UI to cancel them; rejected explicitly for now.
-- **Employee create/terminate, relocation/currency change** — HRIS owns the employee lifecycle; this tool manages pay.
-- **Approval workflows, multiple roles, employee self-service** — single persona; the >20% confirmation and
-  audit log cover the main risk for v1.
-- **Bonus, equity, benefits, pay bands** — base salary first; bands are the natural next step (data model has level).
-- **Bulk import from Excel** — valuable for migration but needs validation/preview UX; seed script stands in.
-- **SSO, password reset, rate limiting** — required before production, not needed to evaluate the product.
-
-## Success criteria
-- Find any employee and see their pay history in < 10 seconds.
-- A salary change cannot be saved without a reason, and every change shows who/when/why.
-- Leadership questions 2–4 answered on one screen, without export.
+What do we pay by country, department and job title (min / median / avg / max)?
+What is our total payroll, and how is it split across countries and currencies?
+Who is paid unusually high or low compared with their peer group?
+When did someone's salary last change, and who changed it?
+2. Scope and Features (in)
+#	Feature	Why
+1	Employee directory with server-side search, filters (country, department, currency, salary range) and pagination	10k rows can't be loaded client-side; this is the daily-use screen
+2	Salary update with effective date	Core write action replacing manual Excel edits
+3	Salary history + audit trail (who, old to new, when), written atomically with the update	Salary data is sensitive; every change must be traceable
+4	Pay insights: headcount, min / median / avg / max by country, department and job title; outlier view	This is what lets HR "answer questions about how the org pays"
+5	Per-currency totals, with an optional "show in USD" view using a static rate table	Multi-country org: raw sums across currencies are meaningless
+6	Employee create / edit / deactivate; new records get an opening salary-history row and deactivation preserves history	HR must be able to keep the roster current without erasing compensation records
+7	CSV export of the current filtered view	Smooth transition: HR still shares data in spreadsheets
+8	HR-manager login (JWT in HttpOnly cookie, role guard)	Salary data must not be public once deployed
+9	Seed script: deterministic, 10,000 employees	Reproducible demo and performance testing
+3. Deliberately Left Out (and why)
+Not building	Reasoning
+Payroll runs, payslips, tax and deductions	Different problem (paying people vs. understanding pay); large and compliance-heavy
+Live FX rates / FX-based salary conversion on edit	External dependency and accuracy concerns; a static rate table is enough for comparison. Stored salary is never altered
+Multiple roles, SSO, user-management UI	Persona is a single HR manager; one bootstrapped account keeps the surface small
+Bulk Excel/CSV import	Valuable for migration, but a one-time task better handled by the seed/migration script than a UI that needs error-row handling
+Approval workflows, salary bands and compensation planning	Needs HR process input I don't have; the audit trail covers accountability for now
+Password reset, rate limiting, token revocation	Production hardening; documented as known gaps, not needed to demonstrate the product
+Real-time updates, notifications, mobile app	No evidence the persona needs them
+4. Key Decisions and Trade-offs
+PostgreSQL + Prisma: relational data and aggregate queries (median, percentiles) fit SQL; migrations are versioned. Trade-off: needs a hosted DB for deployment.
+Aggregates computed in the database, never in the browser or app memory, to stay fast at 10k rows and beyond.
+Money stored as DECIMAL, grouped by currency, and never summed across currencies without an explicit conversion step.
+Next.js UI + NestJS API, kept separate: a clear boundary between UI and business logic, at the cost of more setup than a single full-stack app.
+5. Success Criteria
+Directory search and filters respond in well under 1 second on 10,000 rows.
+Every salary change produces a history row and an audit row, or neither (atomic); new employee creation and its opening salary-history row are also atomic.
+Core logic (roster lifecycle, filters, aggregates, peer outliers, salary update, auth, USD conversion and CSV safety) is covered by deterministic tests.
+The app is deployed, seeded and demonstrable end to end.
+6. Assumptions
+Salaries are annual, in the employee's local currency (USD, EUR, GBP, INR).
+Data is synthetic; no real PII is involved.
+One HR manager account is enough for this release.

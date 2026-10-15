@@ -1,47 +1,58 @@
-# Design decisions, trade-offs and performance
+# Design Decisions and Trade-offs
 
-## Architecture
-```mermaid
-flowchart LR
-  HR[HR manager browser] -->|same origin /api| NEXT[Next.js app]
-  NEXT -->|rewrite proxy| API[NestJS API]
-  API --> G[JWT cookie guard + HR role guard]
-  G --> C[Controllers + DTO validation]
-  C --> S[EmployeesService]
-  S --> P[(PostgreSQL via Prisma)]
-```
+Short records of the choices that shaped the system. Each entry: context, decision, trade-off, and what I'd change at scale.
 
-| Decision | Alternatives | Why |
-|---|---|---|
-| NestJS + Prisma + PostgreSQL | SQLite, raw SQL | Postgres gives `DECIMAL`, row locks and `percentile_cont`; Prisma gives typed queries and migrations |
-| Money as `DECIMAL(14,2)`, never summed across currencies | Floats; convert to USD | Exactness; FX is out of scope (see REQUIREMENTS) |
-| Currency fixed by the employee record | Editable currency | A currency change is a relocation event, not a raise; silently changing it corrupted history |
-| Effective date must be ≤ today and ≥ current effective date | Allow any date | Back-dating rewrote "current salary" from an older record; future dates need scheduling |
-| >20% changes need `confirmLargeChange` (API **and** UI) | UI-only warning | The API is the source of truth; scripts can't bypass the guard |
-| Reason required on every change | Optional note | An audit row without "why" doesn't answer HR's real question |
-| Salary filters/sorting require a currency | Compare raw numbers | INR 50,000 ≠ USD 50,000; the API returns 400 rather than a misleading result |
-| Analytics via one whitelisted raw SQL query | Prisma `groupBy` | `groupBy` has no median/percentiles; the dimension is mapped to a fixed column identifier, values are parameterised |
-| Same-origin `/api` via Next.js rewrite | Direct cross-origin calls | `SameSite=Strict` cookies are not sent cross-site, so a Vercel + Render split would break login |
-| 15-min JWT + sliding refresh while active | Long-lived token; server sessions | Short exposure window; active users aren't logged out mid-edit; idle screens sign out |
-| Radix UI primitives + Tailwind | MUI, Mantine | Accessible dialog/tabs (focus trap, keyboard) without fighting an existing visual design |
-| Seeded PRNG for seed data | Index arithmetic; faker | Realistic, reproducible; no extra dependency; generator is pure and unit-tested |
+## D1. PostgreSQL + Prisma (not SQLite)
+- **Context:** Needs aggregate queries (median, percentiles) and versioned schema changes.
+- **Decision:** PostgreSQL 16 with Prisma migrations.
+- **Trade-off:** Requires a hosted database for deployment, so setup is heavier than SQLite.
+- **At scale:** Add read replicas or materialized views for insights if aggregates get slow.
 
-## Performance (10,000 employees)
-- **Directory:** server-side `count` + `skip/take` (≤100 rows/page). Indexes on `(country, department)`,
-  `(currency, salary)`, `fullName`, `level`. Search is `ILIKE '%term%'`, a sequential scan — cheap at
-  10k rows. At ~1M rows add a `pg_trgm` GIN index and switch to keyset pagination.
-- **Summary/insights:** single aggregate queries; `percentile_cont` over 10k rows is cheap.
-- **Salary update:** one transaction with `SELECT … FOR UPDATE` so concurrent edits of the same employee
-  serialise instead of losing an update or writing a wrong "previous salary" to the audit.
-- **CSV export:** builds all matching rows in memory (~1.5 MB for 10k). Fine here; stream with a cursor
-  beyond ~100k rows.
-- **Frontend:** search is debounced (180 ms) and stale requests are aborted, so typing never races.
+## D2. Aggregates computed in SQL
+- **Context:** The HR manager asks questions over all 10,000 rows (and growing).
+- **Decision:** `GROUP BY` and `percentile_cont` run in the database. Nothing is aggregated in JS or the browser.
+- **Trade-off:** Raw SQL for percentiles is less type-safe than the Prisma client.
+- **Mitigation:** Isolate raw queries in one service and cover them with tests against a real Postgres.
 
-## Testing strategy
-| Layer | Tool | What it proves |
-|---|---|---|
-| Service unit tests | Jest, mocked Prisma | Business rules: pagination, sorting, date/size rules, audit content, CSV escaping |
-| HTTP tests | Supertest, mocked Prisma | Auth, roles, DTO validation, error mapping, CSV response body |
-| Integration | Jest + real PostgreSQL (CI) | Raw SQL, row lock + transaction atomicity, percentile maths, enum ordering |
-| Seed generator | Jest | Determinism, uniqueness, every country×department pair exists, pay rises with level |
-| UI | React Testing Library | Login/expiry, filters/sort/pagination requests, salary dialog rules, history, insights |
+## D3. Server-side pagination, filtering and search
+- **Decision:** `skip`/`take` with a capped page size (max 100), and filters applied in the query.
+- **Trade-off:** `contains` search can't use a normal B-tree index.
+- **At scale:** Add a `pg_trgm` GIN index on name and code.
+
+## D4. Money as DECIMAL, grouped by currency
+- **Decision:** `DECIMAL(14,2)` storage. Totals and averages are per currency. Cross-currency views use an explicit, static rate table and never mutate stored salaries.
+- **Trade-off:** JSON responses convert to JS `number`, so they're display-only, not for arbitrary-precision arithmetic.
+
+## D5. Atomic salary change + history + audit
+- **Decision:** One transaction updates the salary, inserts a `SalaryHistory` row and inserts a `SalaryChangeAudit` row with the actor.
+- **Why:** Salary data is sensitive. A change without a record, or a record without a change, is worse than a failure.
+
+## D6. Auth: JWT in HttpOnly cookie, role guard
+- **Decision:** 15-minute HS256 token in an HttpOnly, SameSite=Strict cookie. The user and role are reloaded from the DB on every request.
+- **Trade-off:** Stateless tokens can't be revoked before expiry (mitigated by the short lifetime and the `isActive` check).
+- **Known gaps:** No rate limiting or CSRF token (documented, not hidden).
+
+## D7. Separate API (NestJS) and UI (Next.js)
+- **Decision:** Clear boundary between presentation and business logic.
+- **Trade-off:** More setup than a single full-stack app, and two deployables.
+
+## D8. CSV export neutralizes formula injection
+- **Decision:** Cells starting with `=`, `+`, `-` or `@` are prefixed so they can't execute in a spreadsheet.
+- **Why:** HR will open exports in Excel, and names or departments are text that could be hostile.
+
+## D9. Testing strategy
+- **Decision:** Fast unit tests with mocked Prisma for service logic. A small set of integration tests against real Postgres for filters, aggregates and the transaction.
+- **Why:** Mocked tests prove logic but not SQL. The integration set covers the highest-risk queries.
+
+## D10. Employee lifecycle
+- **Decision:** New employees receive an opening salary-history row in the same transaction as their profile. Profile edits cannot change salary or currency; salary updates continue through the reasoned, audited route. Deactivation is a soft status change so salary history and audit references remain intact.
+- **Trade-off:** This release has no reactivation or bulk-import workflow.
+
+## D11. Pay outliers and USD comparison
+- **Decision:** Compare employees only with peers sharing job title, country and currency. Require at least five active peers and flag values below 0.6× or above 1.5× the median. For the optional USD total, multiply local salaries by static USD multipliers: USD 1.00, EUR 1.08, GBP 1.27 and INR 0.012.
+- **Trade-off:** The outlier thresholds and FX values are illustrative product defaults, not compensation policy or accounting rates. The UI labels the USD total as a comparison.
+
+## Performance notes
+- Indexes: country/department, currency/salary, full name, job title/country/currency for peer insights, employee active status, and history by employee/date.
+- Seed inserts in batches of 1,000.
+- No measured query timings are available yet. Record directory and insights timings on the seeded 10,000-row database before making a latency claim.

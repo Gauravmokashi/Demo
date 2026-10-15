@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Query,
   Res,
 } from '@nestjs/common';
@@ -13,7 +15,12 @@ import { Response } from 'express';
 import { Roles } from '../auth/auth.decorators';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthPrincipal } from '../auth/auth.types';
-import { AnalyticsQueryDto, EmployeeQueryDto } from './employee-query.dto';
+import {
+  AnalyticsQueryDto,
+  CreateEmployeeDto,
+  EmployeeQueryDto,
+  UpdateEmployeeDto,
+} from './employee-query.dto';
 import { UpdateSalaryDto } from './salary-update.dto';
 import { EmployeesService } from './employees.service';
 
@@ -30,6 +37,16 @@ export class EmployeesController {
   @Get('analytics')
   getAnalytics(@Query() query: AnalyticsQueryDto) {
     return this.employeesService.getAnalytics(query);
+  }
+
+  @Get('outliers')
+  getOutliers() {
+    return this.employeesService.getOutliers();
+  }
+
+  @Post()
+  createEmployee(@Body() body: CreateEmployeeDto) {
+    return this.employeesService.createEmployee(body);
   }
 
   // Uses the same validated filters as the directory; pagination params are ignored so the
@@ -51,6 +68,16 @@ export class EmployeesController {
   @Get(':id/history')
   getHistory(@Param('id', ParseIntPipe) id: number) {
     return this.employeesService.getHistory(id);
+  }
+
+  @Patch(':id')
+  updateEmployee(@Param('id', ParseIntPipe) id: number, @Body() body: UpdateEmployeeDto) {
+    return this.employeesService.updateEmployee(id, body);
+  }
+
+  @Delete(':id')
+  deactivateEmployee(@Param('id', ParseIntPipe) id: number) {
+    return this.employeesService.deactivateEmployee(id);
   }
 
   @Patch(':id/salary')

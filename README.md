@@ -3,18 +3,19 @@
 Web app for an HR manager to manage salaries for 10,000 employees across 10 countries and 4 currencies,
 and to answer "how do we pay people?" without spreadsheets.
 
-- **Directory** — server-side search, filters (country, department, level, currency, salary range), sorting, pagination, CSV export of exactly what is filtered.
+- **Directory** — server-side search, filters (country, department, level, currency, salary range), sorting, pagination, and CSV export of the matching view.
+- **Roster** — add employees with an opening salary-history row, edit profile fields, and deactivate records without deleting their history.
 - **Salary changes** — effective date + required reason, live % change, confirmation above 20%, atomic history + audit record.
 - **Employee history** — who changed what, when and why; full salary timeline.
-- **Pay insights** — median, middle 50% and range by country, department or level; never mixes currencies.
+- **Pay insights** — median, middle 50% and range by country, department, level or job title; peer outliers; optional illustrative USD comparison.
 
 | Read this | For |
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Goal, scope, and what is deliberately left out |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture, trade-offs, performance, testing strategy |
-| [docs/PROCESS.md](docs/PROCESS.md) | How the solution evolved |
 | [docs/AI_USAGE.md](docs/AI_USAGE.md) | How AI tools were used and checked |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deploying API, frontend and database |
+| [docs/INSIGHTS_QUERIES.md](docs/INSIGHTS_QUERIES.md) | Analytics behavior and peer outlier rules |
 
 **Stack:** NestJS 10 · Prisma 6 · PostgreSQL 16 · Next.js 16 · React 19 · Radix UI · Tailwind · Jest.
 
@@ -67,14 +68,21 @@ HR-manager session cookie.
 |---|---|
 | `POST auth/login` · `POST auth/refresh` · `POST auth/logout` · `GET auth/me` | Session (15-min HttpOnly cookie, refreshed while active) |
 | `GET health` | Readiness; 503 when the database is unreachable |
-| `GET dashboard/summary` | Headcount, payroll and average per currency, countries, departments, levels |
+| `GET dashboard/summary` | Active headcount, payroll and average per currency, illustrative total in USD, countries, departments, levels |
 | `GET employees` | `page, limit, search, country, department, level, currency, minSalary, maxSalary, sortBy, sortOrder` (salary bounds/sort need `currency`) |
+| `POST employees` | Create a roster record and its opening salary-history row |
+| `PATCH employees/:id` · `DELETE employees/:id` | Edit profile fields or soft-deactivate a record; salary and currency remain on their audited workflow |
 | `GET employees/export` | CSV of every row matching the same filters |
-| `GET employees/analytics` | `dimension=country\|department\|level`, optional `country, department, currency` → count, min, P25, median, P75, max, average, total per group and currency |
+| `GET employees/analytics` | `dimension=country\|department\|level\|jobTitle`, optional `country, department, currency` → count, min, P25, median, P75, max, average, total per group and currency |
+| `GET employees/outliers` | Salaries outside 0.6×–1.5× of a peer median, for groups of at least five |
 | `GET employees/:id` · `GET employees/:id/history` | Employee, salary timeline and attributed changes |
 | `PATCH employees/:id/salary` | `{ salary, effectiveDate: "YYYY-MM-DD", reason, confirmLargeChange? }` |
 
-Invalid input returns 400 with a message (including database range errors), never a 500.
+Invalid input returns 400 with a message (including database range errors), never a 500. Deactivated employees are excluded from the directory, payroll totals, analytics and export; their salary history stays available in the database.
+
+## Assessment delivery
+
+The repository contains deployment instructions and CI, but no live deployment URL or recorded demo is committed. Add those to the submission after deploying with the hosting account you choose.
 
 ## Security notes
 Passwords are bcrypt-hashed; sessions are short-lived HS256 JWTs in HttpOnly, SameSite=Strict cookies; every

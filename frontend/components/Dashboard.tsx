@@ -2,11 +2,12 @@
 
 import { Download, LogOut, Users, Wallet } from 'lucide-react';
 import { ReactNode, useState } from 'react';
-import { apiRequest, UnauthorizedError } from '@/lib/api';
+import { apiJson, apiRequest, UnauthorizedError } from '@/lib/api';
 import { AuthUser, DashboardSummary, Employee } from '@/lib/types';
 import { useApiData } from '@/lib/useApiData';
 import { useDirectory } from '@/lib/useDirectory';
 import { EmployeeDirectory } from './EmployeeDirectory';
+import { EmployeeEditorDialog } from './EmployeeEditorDialog';
 import { EmployeeHistoryPanel } from './EmployeeHistoryPanel';
 import { InsightsPanel } from './InsightsPanel';
 import { PayrollOverview } from './PayrollOverview';
@@ -19,6 +20,8 @@ type Props = { user: AuthUser; onLogout: () => void; onUnauthorized: () => void 
 export function Dashboard({ user, onLogout, onUnauthorized }: Props) {
   const [tab, setTab] = useState('directory');
   const [editing, setEditing] = useState<Employee | null>(null);
+  const [employeeEditorOpen, setEmployeeEditorOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [viewingHistory, setViewingHistory] = useState<Employee | null>(null);
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
@@ -56,6 +59,27 @@ export function Dashboard({ user, onLogout, onUnauthorized }: Props) {
     setNotice(`Salary updated for ${updated.fullName}.`);
     summary.reload();
     directory.reload();
+  }
+
+  function employeeSaved(saved: Employee) {
+    setEmployeeEditorOpen(false);
+    setEditingEmployee(null);
+    setNotice(`Employee record saved for ${saved.fullName}.`);
+    summary.reload();
+    directory.reload();
+  }
+
+  async function deactivateEmployee(employee: Employee) {
+    if (!window.confirm(`Deactivate ${employee.fullName}? Their salary history will be retained.`)) return;
+    try {
+      await apiJson(`/employees/${employee.id}`, { method: 'DELETE', fallbackMessage: 'Employee could not be deactivated.' });
+      setNotice(`${employee.fullName} was deactivated.`);
+      summary.reload();
+      directory.reload();
+    } catch (reason) {
+      if (reason instanceof UnauthorizedError) onUnauthorized();
+      else setActionError(reason instanceof Error ? reason.message : 'Employee could not be deactivated.');
+    }
   }
 
   return (
@@ -98,7 +122,14 @@ export function Dashboard({ user, onLogout, onUnauthorized }: Props) {
               content: (
                 <div className="grid gap-9 xl:grid-cols-[0.75fr_1.75fr]">
                   <PayrollOverview summary={summary.data} selectedCountry={directory.filters.country} onSelectCountry={(country) => directory.setFilter('country', country)} />
-                  <EmployeeDirectory directory={directory} summary={summary.data} onEdit={setEditing} onHistory={setViewingHistory} />
+                  <EmployeeDirectory
+                    directory={directory}
+                    summary={summary.data}
+                    onEditProfile={(employee) => { setEditingEmployee(employee); setEmployeeEditorOpen(true); }}
+                    onSalaryEdit={setEditing}
+                    onHistory={setViewingHistory}
+                    onDeactivate={deactivateEmployee}
+                  />
                 </div>
               ),
             },
@@ -108,6 +139,7 @@ export function Dashboard({ user, onLogout, onUnauthorized }: Props) {
       </div>
 
       {editing && <SalaryEditDialog employee={editing} onClose={() => setEditing(null)} onSaved={salarySaved} onUnauthorized={onUnauthorized} />}
+      {employeeEditorOpen && <EmployeeEditorDialog employee={editingEmployee} onClose={() => { setEmployeeEditorOpen(false); setEditingEmployee(null); }} onSaved={employeeSaved} onUnauthorized={onUnauthorized} />}
       {viewingHistory && (
         <EmployeeHistoryPanel employeeId={viewingHistory.id} name={viewingHistory.fullName} onClose={() => setViewingHistory(null)} onUnauthorized={onUnauthorized} />
       )}

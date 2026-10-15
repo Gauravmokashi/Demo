@@ -25,6 +25,7 @@ export interface Employee {
   currency: Currency;
   salary: number;
   effectiveDate: string;
+  isActive: boolean;
 }
 
 export interface EmployeeFilter {

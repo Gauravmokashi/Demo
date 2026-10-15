@@ -21,12 +21,15 @@ export const employee = {
   currency: 'INR' as const,
   salary: 1800000,
   effectiveDate: '2025-01-01',
+  isActive: true,
 };
 
 export const summary = {
   totalEmployees: 1,
   averageSalaryByCurrency: [{ currency: 'INR', average: 1800000 }],
   payrollByCurrency: [{ currency: 'INR', total: 1800000, employeeCount: 1 }],
+  payrollInUsd: 21600,
+  usdRatesAreIllustrative: true as const,
   countries: [{ country: 'India', count: 1 }],
   departments: [{ department: 'Engineering', count: 1 }],
   levels: ['JUNIOR', 'MID', 'SENIOR', 'LEAD', 'PRINCIPAL'],
@@ -38,6 +41,8 @@ export const analytics = {
     { key: 'Engineering', currency: 'INR', count: 40, min: 900000, p25: 1500000, median: 1800000, p75: 2200000, max: 4000000, average: 1900000, total: 76000000 },
   ],
 };
+
+export const outliers = [];
 
 export const history = {
   employee,
@@ -91,11 +96,15 @@ export function installFetch(options: FetchOptions = {}) {
     if (path.endsWith('/dashboard/summary')) return jsonResponse(summary, options.dashboardStatus ?? 200);
     if (path.endsWith('/employees/export')) return jsonResponse('csv', 200);
     if (path.endsWith('/employees/analytics')) return jsonResponse(analytics, 200);
+    if (path.endsWith('/employees/outliers')) return jsonResponse(outliers, 200);
     if (path.endsWith('/employees/7/history')) return jsonResponse(history, 200);
     if (path.endsWith('/employees/7/salary') && method === 'PATCH') {
       const response = options.salaryResponse ?? { status: 200, body: employee };
       return jsonResponse(response.body, response.status);
     }
+    if (path.endsWith('/employees/7') && method === 'PATCH') return jsonResponse({ ...employee, ...JSON.parse(String(init?.body ?? '{}')) }, 200);
+    if (path.endsWith('/employees/7') && method === 'DELETE') return jsonResponse({ id: employee.id, isActive: false }, 200);
+    if (path.endsWith('/employees') && method === 'POST') return jsonResponse({ ...employee, ...JSON.parse(String(init?.body ?? '{}')), id: 8 }, 201);
     if (path.endsWith('/employees')) {
       const page = Number(url.searchParams.get('page') ?? 1);
       return jsonResponse({ data: [employee], page, limit: 10, total: 21, totalPages: 3 }, options.employeeStatus ?? 200);

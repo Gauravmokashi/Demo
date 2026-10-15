@@ -67,6 +67,55 @@ describe('HR salary dashboard', () => {
     expect(screen.getByText('Senior Software Engineer')).toBeTruthy();
   });
 
+  it('creates a roster record and sends its initial compensation', async () => {
+    const user = await renderAuthenticated();
+    await user.click(screen.getByRole('button', { name: 'Add employee' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Employee ID'), 'ACM-10001');
+    await user.type(within(dialog).getByLabelText('Full name'), 'Aarav Patel');
+    await user.type(within(dialog).getByLabelText('Department'), 'Engineering');
+    await user.type(within(dialog).getByLabelText('Country'), 'India');
+    await user.type(within(dialog).getByLabelText('Job title'), 'Software Engineer');
+    fireEvent.change(within(dialog).getByLabelText('Hire date'), { target: { value: '2025-01-10' } });
+    await user.type(within(dialog).getByLabelText('Annual salary'), '1800000');
+    fireEvent.change(within(dialog).getByLabelText('Salary effective date'), { target: { value: '2025-01-10' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add employee' }));
+
+    await screen.findByText('Employee record saved for Aarav Patel.');
+    const call = findCall((url, init) => url.pathname.endsWith('/employees') && init?.method === 'POST');
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      employeeCode: 'ACM-10001',
+      fullName: 'Aarav Patel',
+      salary: '1800000',
+      currency: 'USD',
+    });
+  });
+
+  it('edits employee profile fields through the roster editor', async () => {
+    const user = await renderAuthenticated();
+    await user.click(screen.getByRole('button', { name: 'Edit employee Maya Patel' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Department'));
+    await user.type(within(dialog).getByLabelText('Department'), 'Product');
+    await user.click(within(dialog).getByRole('button', { name: 'Save employee' }));
+
+    await screen.findByText('Employee record saved for Maya Patel.');
+    const call = findCall((url, init) => url.pathname.endsWith('/employees/7') && init?.method === 'PATCH');
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ department: 'Product' });
+    expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty('salary');
+  });
+
+  it('deactivates a roster record while retaining the salary history action', async () => {
+    const user = await renderAuthenticated();
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+    await user.click(screen.getByRole('button', { name: 'Deactivate Maya Patel' }));
+    window.confirm = originalConfirm;
+
+    await screen.findByText('Maya Patel was deactivated.');
+    expect(findCall((url, init) => url.pathname.endsWith('/employees/7') && init?.method === 'DELETE')).toBeTruthy();
+  });
+
   it('sends search, directory filters and salary range to the API', async () => {
     const user = await renderAuthenticated();
 
@@ -218,5 +267,21 @@ describe('HR salary dashboard', () => {
     await waitFor(() => {
       expect(findCall((url) => url.pathname.endsWith('/employees/analytics') && url.searchParams.get('dimension') === 'level')).toBeTruthy();
     });
+
+    await user.selectOptions(screen.getByLabelText('Group by'), 'jobTitle');
+    await waitFor(() => {
+      expect(findCall((url) => url.pathname.endsWith('/employees/analytics') && url.searchParams.get('dimension') === 'jobTitle')).toBeTruthy();
+    });
+    expect(screen.getByRole('heading', { name: 'Unusual pay compared with peers' })).toBeTruthy();
+    expect(findCall((url) => url.pathname.endsWith('/employees/outliers'))).toBeTruthy();
+  });
+
+  it('shows combined USD payroll only when the illustrative conversion is enabled', async () => {
+    const user = await renderAuthenticated();
+
+    expect(screen.queryByText('Illustrative USD conversion')).toBeNull();
+    await user.click(screen.getByLabelText('Show combined payroll in USD'));
+    expect(screen.getByText('Illustrative USD conversion')).toBeTruthy();
+    expect(screen.getByText('$21,600')).toBeTruthy();
   });
 });

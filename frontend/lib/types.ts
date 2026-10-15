@@ -22,6 +22,7 @@ export type Employee = {
   currency: Currency;
   salary: number;
   effectiveDate: string;
+  isActive: boolean;
 };
 
 export type AuthUser = {
@@ -43,12 +44,14 @@ export type DashboardSummary = {
   totalEmployees: number;
   averageSalaryByCurrency: { currency: Currency; average: number }[];
   payrollByCurrency: { currency: Currency; total: number; employeeCount: number }[];
+  payrollInUsd: number;
+  usdRatesAreIllustrative: true;
   countries: { country: string; count: number }[];
   departments: { department: string; count: number }[];
   levels: JobLevel[];
 };
 
-export type AnalyticsDimension = 'country' | 'department' | 'level';
+export type AnalyticsDimension = 'country' | 'department' | 'level' | 'jobTitle';
 
 export type PayGroup = {
   key: string;
@@ -64,6 +67,19 @@ export type PayGroup = {
 };
 
 export type Analytics = { dimension: AnalyticsDimension; groups: PayGroup[] };
+
+export type SalaryOutlier = {
+  id: number;
+  employeeId: string;
+  fullName: string;
+  jobTitle: string;
+  country: string;
+  currency: Currency;
+  salary: number;
+  peerMedian: number;
+  ratio: number;
+  peerCount: number;
+};
 
 export type EmployeeHistory = {
   employee: Employee;

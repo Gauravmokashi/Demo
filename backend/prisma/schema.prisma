@@ -1,4 +1,4 @@
-generator client {
+﻿generator client {
   provider = "prisma-client-js"
 }
 
@@ -50,12 +50,15 @@ model Employee {
   currency      Currency
   salary        Decimal         @db.Decimal(14, 2)
   effectiveDate DateTime        @db.Date
+  isActive      Boolean         @default(true)
   salaryHistory SalaryHistory[]
   salaryAudits  SalaryChangeAudit[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
   @@index([country, department])
+  @@index([isActive])
+  @@index([jobTitle, country, currency])
   @@index([currency, salary])
   @@index([fullName])
   @@index([level])
@@ -90,3 +93,4 @@ model SalaryChangeAudit {
   @@index([actorUserId, changedAt])
   @@index([employeeId, changedAt])
 }
+

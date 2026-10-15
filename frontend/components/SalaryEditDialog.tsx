@@ -72,7 +72,7 @@ export function SalaryEditDialog({ employee, onClose, onSaved, onUnauthorized }:
           <span className="text-[#65726a]">{formatMoney(employee.salary, employee.currency)} → <strong className="text-[#182520]">{formatMoney(newSalary || 0, employee.currency)}</strong></span>
           <span className={`font-semibold tabular-nums ${isLargeChange ? 'text-[#a34a34]' : 'text-[#2f5f43]'}`}>{formatPercent(change)}</span>
         </div>
-        <p className="text-xs text-[#758078]">Paid in {employee.currency}. Currency follows the employee&apos;s country and isn&apos;t changed here.</p>
+        <p className="text-xs text-[#758078]">Paid in {employee.currency}. This salary update keeps the currently assigned currency.</p>
         <label className="block text-sm font-medium">Effective date
           <input className="filter-control mt-1 w-full px-3" name="effectiveDate" type="date" min={employee.effectiveDate} max={todayIsoDate()} defaultValue={todayIsoDate()} required />
         </label>

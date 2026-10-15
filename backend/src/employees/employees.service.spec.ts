@@ -16,6 +16,7 @@ const databaseEmployee = {
   currency: 'INR' as const,
   salary: decimal(1800000),
   effectiveDate: new Date('2025-01-01T00:00:00.000Z'),
+  isActive: true,
 };
 
 function createService() {
@@ -25,13 +26,16 @@ function createService() {
         salary: databaseEmployee.salary,
         currency: databaseEmployee.currency,
         effectiveDate: databaseEmployee.effectiveDate,
+        isActive: true,
       },
     ]),
     employee: {
+      create: jest.fn<() => Promise<any>>().mockResolvedValue(databaseEmployee),
       update: jest.fn<() => Promise<any>>().mockResolvedValue({
         ...databaseEmployee,
         salary: decimal(1900000),
       }),
+      updateMany: jest.fn<() => Promise<any>>().mockResolvedValue({ count: 1 }),
     },
     salaryHistory: { create: jest.fn<() => Promise<any>>().mockResolvedValue({}) },
     salaryChangeAudit: { create: jest.fn<() => Promise<any>>().mockResolvedValue({}) },
@@ -41,6 +45,9 @@ function createService() {
       count: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn().mockResolvedValue(databaseEmployee),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       groupBy: jest.fn(),
     },
     salaryHistory: { findMany: jest.fn() },
@@ -76,6 +83,8 @@ describe('EmployeesService', () => {
         { currency: 'INR', total: 3600000, employeeCount: 2 },
       ]);
       expect(summary.averageSalaryByCurrency).toEqual([{ currency: 'INR', average: 1800000 }]);
+      expect(summary.payrollInUsd).toBe(21600);
+      expect(summary.usdRatesAreIllustrative).toBe(true);
       expect(summary.levels).toEqual(['JUNIOR', 'MID', 'SENIOR', 'LEAD', 'PRINCIPAL']);
     });
   });
@@ -104,6 +113,7 @@ describe('EmployeesService', () => {
         currency: 'INR',
         salary: 1800000,
         effectiveDate: '2025-01-01',
+        isActive: true,
       });
     });
 
@@ -142,7 +152,7 @@ describe('EmployeesService', () => {
       await service.listEmployees({ level: 'LEAD', currency: 'USD', minSalary: 100000, maxSalary: 200000 });
 
       expect(prisma.employee.count).toHaveBeenCalledWith({
-        where: { level: 'LEAD', currency: 'USD', salary: { gte: 100000, lte: 200000 } },
+        where: { isActive: true, level: 'LEAD', currency: 'USD', salary: { gte: 100000, lte: 200000 } },
       });
     });
   });
@@ -182,7 +192,7 @@ describe('EmployeesService', () => {
       const csv = await service.exportCsv({ currency: 'INR', minSalary: 1000000 });
 
       expect(prisma.employee.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { currency: 'INR', salary: { gte: 1000000 } } }),
+        expect.objectContaining({ where: { isActive: true, currency: 'INR', salary: { gte: 1000000 } } }),
       );
       expect(csv.split('\n')).toHaveLength(2);
       expect(csv.split('\n')[0]).toContain('jobTitle');
@@ -256,6 +266,14 @@ describe('EmployeesService', () => {
 
       await expect(service.updateSalary(999, validChange, 42)).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('does not allow a salary change for a deactivated employee', async () => {
+      const { service, transaction } = createService();
+      transaction.$queryRaw.mockResolvedValueOnce([{ ...databaseEmployee, isActive: false }]);
+
+      await expect(service.updateSalary(1, validChange, 42)).rejects.toBeInstanceOf(NotFoundException);
+      expect(transaction.employee.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('analytics', () => {
@@ -308,6 +326,88 @@ describe('EmployeesService', () => {
 
       expect(result.dimension).toBe('country');
       expect(prisma.$queryRaw.mock.calls[0][0].sql).toContain('GROUP BY "country", "currency"');
+    });
+
+    it('supports grouping pay by job title', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await service.getAnalytics({ dimension: 'jobTitle' });
+
+      expect(prisma.$queryRaw.mock.calls[0][0].sql).toContain('GROUP BY "jobTitle", "currency"');
+    });
+
+    it('uses the peer definition and excludes inactive employees for outliers', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await expect(service.getOutliers()).resolves.toEqual([]);
+      const sql = prisma.$queryRaw.mock.calls[0][0].sql;
+      expect(sql).toContain('HAVING COUNT(*) >= 5');
+      expect(sql).toContain('"isActive" = true');
+      expect(sql).toContain('p.median::numeric * 1.5');
+      expect(sql).toContain('p.median::numeric * 0.6');
+    });
+  });
+
+  describe('employee roster', () => {
+    const newEmployee = {
+      employeeCode: 'ACM-10001',
+      fullName: 'Aarav Patel',
+      department: 'Engineering',
+      country: 'India',
+      jobTitle: 'Software Engineer',
+      level: 'MID' as const,
+      hireDate: '2025-01-01',
+      currency: 'INR',
+      salary: 1800000,
+      effectiveDate: '2025-01-01',
+    };
+
+    it('creates a roster row and opening salary history atomically', async () => {
+      const { service, transaction } = createService();
+
+      await service.createEmployee(newEmployee);
+
+      expect(transaction.employee.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ employeeCode: 'ACM-10001', isActive: true }),
+      });
+      expect(transaction.salaryHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ employeeId: 1, currency: 'INR' }),
+      });
+    });
+
+    it('rejects a future opening effective date', async () => {
+      const { service, transaction } = createService();
+      await expect(service.createEmployee({ ...newEmployee, effectiveDate: '2999-01-01' })).rejects.toThrow(/cannot be in the future/);
+      expect(transaction.employee.create).not.toHaveBeenCalled();
+    });
+
+    it('updates profile fields without changing compensation', async () => {
+      const { service, prisma } = createService();
+      prisma.employee.findUnique.mockResolvedValue(databaseEmployee);
+
+      await service.updateEmployee(1, { department: 'Product' });
+
+      expect(prisma.employee.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, isActive: true },
+        data: { department: 'Product' },
+      });
+      expect(prisma.employee.findUnique).toHaveBeenCalledWith({ where: { id: 1 } });
+    });
+
+    it('soft-deactivates the employee and returns 404 for an already inactive record', async () => {
+      const { service, prisma } = createService();
+
+      await expect(service.deactivateEmployee(1)).resolves.toEqual({ id: 1, isActive: false });
+      prisma.employee.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.deactivateEmployee(1)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects an empty profile update', async () => {
+      const { service, prisma } = createService();
+      await expect(service.updateEmployee(1, {})).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.employee.updateMany).not.toHaveBeenCalled();
     });
   });
 

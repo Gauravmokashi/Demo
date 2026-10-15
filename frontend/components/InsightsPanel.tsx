@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { toQueryString } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
-import { Analytics, AnalyticsDimension, CURRENCIES, Currency, DashboardSummary, JobLevel, LEVEL_LABELS, PayGroup } from '@/lib/types';
+import { Analytics, AnalyticsDimension, CURRENCIES, Currency, DashboardSummary, JobLevel, LEVEL_LABELS, PayGroup, SalaryOutlier } from '@/lib/types';
 import { useApiData } from '@/lib/useApiData';
 import { EmptyState } from './ui/States';
 
@@ -11,6 +11,7 @@ const DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   country: 'Country',
   department: 'Department',
   level: 'Level',
+  jobTitle: 'Job title',
 };
 
 type Props = { summary: DashboardSummary | null; onUnauthorized: () => void };
@@ -24,6 +25,10 @@ export function InsightsPanel({ summary, onUnauthorized }: Props) {
   const { data, error, loading } = useApiData<Analytics>(`/employees/analytics?${query}`, {
     onUnauthorized,
     fallbackMessage: 'Pay insights could not be loaded.',
+  });
+  const outlierQuery = useApiData<SalaryOutlier[]>('/employees/outliers', {
+    onUnauthorized,
+    fallbackMessage: 'Salary outliers could not be loaded.',
   });
 
   const byCurrency = new Map<Currency, PayGroup[]>();
@@ -39,7 +44,7 @@ export function InsightsPanel({ summary, onUnauthorized }: Props) {
           <p className="section-kicker">Pay insights</p>
           <h2 id="insights-title" className="mt-1 text-xl font-semibold">How pay is distributed</h2>
           <p className="mt-1 max-w-2xl text-sm text-[#65726a]">
-            Median and middle-50% pay range per group. Each currency is shown separately; amounts are never converted or added across currencies.
+            Median and middle-50% pay range by country, department, job level or title. Each currency stays separate.
           </p>
         </div>
       </div>
@@ -72,6 +77,18 @@ export function InsightsPanel({ summary, onUnauthorized }: Props) {
           <PayDistributionTable key={code} currency={code} groups={groups} dimensionLabel={DIMENSION_LABELS[dimension]} label={label} />
         ))}
       </div>
+
+      <section className="mt-10" aria-labelledby="outliers-title">
+        <p className="section-kicker">Peer review</p>
+        <h3 id="outliers-title" className="mt-1 text-lg font-semibold">Unusual pay compared with peers</h3>
+        <p className="mb-4 mt-1 text-xs text-[#65726a]">Flags salaries above 1.5× or below 0.6× the median for the same job title, country and currency. Groups with fewer than five employees are excluded.</p>
+        {outlierQuery.error && <div className="mb-3 text-sm text-[#763b31]" role="alert">{outlierQuery.error}</div>}
+        {!outlierQuery.data?.length && <EmptyState loading={outlierQuery.loading} message="No employees are outside the peer thresholds." />}
+        {!!outlierQuery.data?.length && <div className="overflow-x-auto border-y border-[#cfd8cf]"><table className="w-full min-w-[700px] text-left text-sm">
+          <thead><tr className="bg-[#e8ede7] text-[11px] uppercase text-[#5b6c60]"><th className="px-3 py-3">Employee</th><th className="px-3 py-3">Peer group</th><th className="px-3 py-3 text-right">Salary</th><th className="px-3 py-3 text-right">Peer median</th><th className="px-3 py-3 text-right">Ratio</th></tr></thead>
+          <tbody>{outlierQuery.data.map((person) => <tr key={person.id} className="border-t border-[#e0e5df] bg-white/70"><td className="px-3 py-3 font-medium">{person.fullName}<div className="text-xs font-normal text-[#758078]">{person.employeeId}</div></td><td className="px-3 py-3">{person.jobTitle} · {person.country}<div className="text-xs text-[#758078]">{person.peerCount} peers</div></td><td className="px-3 py-3 text-right">{formatMoney(person.salary, person.currency)}</td><td className="px-3 py-3 text-right">{formatMoney(person.peerMedian, person.currency)}</td><td className="px-3 py-3 text-right font-semibold">{person.ratio.toFixed(2)}×</td></tr>)}</tbody>
+        </table></div>}
+      </section>
     </section>
   );
 }

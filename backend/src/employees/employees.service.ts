@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Currency as PrismaCurrency, JobLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AnalyticsDimension, AnalyticsQueryDto } from './employee-query.dto';
+import {
+  AnalyticsDimension,
+  AnalyticsQueryDto,
+  CreateEmployeeDto,
+  UpdateEmployeeDto,
+} from './employee-query.dto';
 import { EmployeeFilter, EmployeeQuery } from './employees.types';
 import { LARGE_CHANGE_THRESHOLD, UpdateSalaryDto } from './salary-update.dto';
 
@@ -17,6 +22,7 @@ type EmployeeRecord = {
   currency: PrismaCurrency;
   salary: Prisma.Decimal;
   effectiveDate: Date;
+  isActive: boolean;
 };
 
 type AnalyticsRow = {
@@ -37,6 +43,15 @@ const ANALYTICS_COLUMNS: Record<AnalyticsDimension, Prisma.Sql> = {
   country: Prisma.raw('"country"'),
   department: Prisma.raw('"department"'),
   level: Prisma.raw('"level"'),
+  jobTitle: Prisma.raw('"jobTitle"'),
+};
+
+// Static, illustrative rates for comparison only. Stored salaries are never converted.
+const USD_RATES: Record<PrismaCurrency, Prisma.Decimal> = {
+  USD: new Prisma.Decimal('1'),
+  EUR: new Prisma.Decimal('1.08'),
+  GBP: new Prisma.Decimal('1.27'),
+  INR: new Prisma.Decimal('0.012'),
 };
 
 const CSV_HEADERS = [
@@ -50,17 +65,19 @@ export class EmployeesService {
 
   async getSummary() {
     const [totalEmployees, currencyGroups, countryGroups, departmentGroups] = await Promise.all([
-      this.prisma.employee.count(),
+      this.prisma.employee.count({ where: { isActive: true } }),
       this.prisma.employee.groupBy({
         by: ['currency'],
+        where: { isActive: true },
         _sum: { salary: true },
         _avg: { salary: true },
         _count: { _all: true },
         orderBy: { currency: 'asc' },
       }),
-      this.prisma.employee.groupBy({ by: ['country'], _count: { _all: true }, orderBy: { country: 'asc' } }),
+      this.prisma.employee.groupBy({ by: ['country'], where: { isActive: true }, _count: { _all: true }, orderBy: { country: 'asc' } }),
       this.prisma.employee.groupBy({
         by: ['department'],
+        where: { isActive: true },
         _count: { _all: true },
         orderBy: { department: 'asc' },
       }),
@@ -77,6 +94,11 @@ export class EmployeesService {
         total: Number(item._sum.salary ?? 0),
         employeeCount: item._count._all,
       })),
+      payrollInUsd: Number(currencyGroups.reduce(
+        (sum, item) => sum.plus(new Prisma.Decimal(item._sum.salary ?? 0).mul(USD_RATES[item.currency])),
+        new Prisma.Decimal(0),
+      )),
+      usdRatesAreIllustrative: true,
       countries: countryGroups.map((item) => ({ country: item.country, count: item._count._all })),
       departments: departmentGroups.map((item) => ({
         department: item.department,
@@ -113,6 +135,61 @@ export class EmployeesService {
     const employee = await this.prisma.employee.findUnique({ where: { id } });
     if (!employee) throw new NotFoundException(`Employee ${id} not found`);
     return this.serializeEmployee(employee);
+  }
+
+  async createEmployee(payload: CreateEmployeeDto) {
+    const hireDate = new Date(`${payload.hireDate}T00:00:00.000Z`);
+    const effectiveDate = new Date(`${payload.effectiveDate}T00:00:00.000Z`);
+    this.assertValidEffectiveDate(effectiveDate, effectiveDate);
+    const salary = new Prisma.Decimal(payload.salary);
+    const employee = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.employee.create({
+        data: {
+          employeeCode: payload.employeeCode,
+          fullName: payload.fullName,
+          department: payload.department,
+          country: payload.country,
+          jobTitle: payload.jobTitle,
+          level: payload.level,
+          hireDate,
+          currency: payload.currency as PrismaCurrency,
+          salary,
+          effectiveDate,
+          isActive: true,
+        },
+      });
+      await transaction.salaryHistory.create({
+        data: { employeeId: created.id, salary, currency: created.currency, effectiveDate },
+      });
+      return created;
+    });
+    return this.serializeEmployee(employee);
+  }
+
+  async updateEmployee(id: number, payload: UpdateEmployeeDto) {
+    if (Object.keys(payload).length === 0) throw new BadRequestException('Provide at least one profile field to update.');
+    const data: Prisma.EmployeeUpdateManyMutationInput = {
+      ...(payload.fullName !== undefined ? { fullName: payload.fullName } : {}),
+      ...(payload.department !== undefined ? { department: payload.department } : {}),
+      ...(payload.country !== undefined ? { country: payload.country } : {}),
+      ...(payload.jobTitle !== undefined ? { jobTitle: payload.jobTitle } : {}),
+      ...(payload.level !== undefined ? { level: payload.level } : {}),
+      ...(payload.hireDate !== undefined ? { hireDate: new Date(`${payload.hireDate}T00:00:00.000Z`) } : {}),
+    };
+    const updated = await this.prisma.employee.updateMany({ where: { id, isActive: true }, data });
+    if (updated.count === 0) throw new NotFoundException(`Employee ${id} not found`);
+    const employee = await this.prisma.employee.findUnique({ where: { id } });
+    if (!employee) throw new NotFoundException(`Employee ${id} not found`);
+    return this.serializeEmployee(employee);
+  }
+
+  async deactivateEmployee(id: number) {
+    const result = await this.prisma.employee.updateMany({
+      where: { id, isActive: true },
+      data: { isActive: false },
+    });
+    if (result.count === 0) throw new NotFoundException(`Employee ${id} not found`);
+    return { id, isActive: false };
   }
 
   async getHistory(id: number) {
@@ -161,9 +238,9 @@ export class EmployeesService {
 
     const updated = await this.prisma.$transaction(async (transaction) => {
       const [current] = await transaction.$queryRaw<
-        { salary: Prisma.Decimal; currency: PrismaCurrency; effectiveDate: Date }[]
-      >(Prisma.sql`SELECT "salary", "currency", "effectiveDate" FROM "Employee" WHERE "id" = ${id} FOR UPDATE`);
-      if (!current) throw new NotFoundException(`Employee ${id} not found`);
+        { salary: Prisma.Decimal; currency: PrismaCurrency; effectiveDate: Date; isActive: boolean }[]
+      >(Prisma.sql`SELECT "salary", "currency", "effectiveDate", "isActive" FROM "Employee" WHERE "id" = ${id} FOR UPDATE`);
+      if (!current?.isActive) throw new NotFoundException(`Employee ${id} not found`);
 
       this.assertValidEffectiveDate(effectiveDate, current.effectiveDate);
       this.assertChangeConfirmed(Number(current.salary), payload.salary, payload.confirmLargeChange);
@@ -192,7 +269,7 @@ export class EmployeesService {
     return this.serializeEmployee(updated);
   }
 
-  /** Pay distribution per group (country, department or level), always split by currency. */
+  /** Pay distribution per group, always split by currency. */
   async getAnalytics(query: AnalyticsQueryDto = {}) {
     const dimension = query.dimension ?? 'country';
     const column = ANALYTICS_COLUMNS[dimension];
@@ -200,7 +277,8 @@ export class EmployeesService {
     if (query.country) conditions.push(Prisma.sql`"country" = ${query.country}`);
     if (query.department) conditions.push(Prisma.sql`"department" = ${query.department}`);
     if (query.currency) conditions.push(Prisma.sql`"currency" = ${query.currency}::"Currency"`);
-    const where = conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
+    conditions.unshift(Prisma.sql`"isActive" = true`);
+    const where = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 
     const rows = await this.prisma.$queryRaw<AnalyticsRow[]>(Prisma.sql`
       SELECT ${column}::text AS "key",
@@ -233,6 +311,52 @@ export class EmployeesService {
         total: Number(row.total),
       })),
     };
+  }
+
+  /** Flags salary values outside 0.6x–1.5x of a peer median; groups need at least five people. */
+  async getOutliers() {
+    const rows = await this.prisma.$queryRaw<{
+      id: number;
+      employeeCode: string;
+      fullName: string;
+      jobTitle: string;
+      country: string;
+      currency: PrismaCurrency;
+      salary: Prisma.Decimal;
+      median: number;
+      ratio: number;
+      peerCount: number;
+    }[]>(Prisma.sql`
+      WITH peers AS (
+        SELECT "jobTitle", "country", "currency",
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY "salary") AS median,
+               COUNT(*)::int AS "peerCount"
+        FROM "Employee"
+        WHERE "isActive" = true
+        GROUP BY "jobTitle", "country", "currency"
+        HAVING COUNT(*) >= 5
+      )
+      SELECT e."id", e."employeeCode", e."fullName", e."jobTitle", e."country", e."currency",
+             e."salary", p.median, ROUND((e."salary" / p.median::numeric), 2) AS ratio,
+             p."peerCount"
+      FROM "Employee" e
+      JOIN peers p USING ("jobTitle", "country", "currency")
+      WHERE e."isActive" = true
+        AND (e."salary" > p.median::numeric * 1.5 OR e."salary" < p.median::numeric * 0.6)
+      ORDER BY ABS(LN(e."salary"::float / p.median)) DESC
+      LIMIT 100`);
+    return rows.map((row) => ({
+      id: row.id,
+      employeeId: row.employeeCode,
+      fullName: row.fullName,
+      jobTitle: row.jobTitle,
+      country: row.country,
+      currency: row.currency,
+      salary: Number(row.salary),
+      peerMedian: Number(row.median),
+      ratio: Number(row.ratio),
+      peerCount: Number(row.peerCount),
+    }));
   }
 
   async exportCsv(query: EmployeeQuery = {}) {
@@ -294,7 +418,7 @@ export class EmployeesService {
   }
 
   private buildWhere(query: EmployeeFilter): Prisma.EmployeeWhereInput {
-    const where: Prisma.EmployeeWhereInput = {};
+    const where: Prisma.EmployeeWhereInput = { isActive: true };
     const search = query.search?.trim();
     if (search) {
       where.OR = [
@@ -340,6 +464,7 @@ export class EmployeesService {
       currency: employee.currency,
       salary: Number(employee.salary),
       effectiveDate: this.dateOnly(employee.effectiveDate),
+      isActive: employee.isActive,
     };
   }
 

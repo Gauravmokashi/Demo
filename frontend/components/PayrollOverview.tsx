@@ -1,6 +1,7 @@
 import { formatMoney } from '@/lib/format';
 import { DashboardSummary } from '@/lib/types';
 import { EmptyState } from './ui/States';
+import { useState } from 'react';
 
 type Props = {
   summary: DashboardSummary | null;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export function PayrollOverview({ summary, selectedCountry, onSelectCountry }: Props) {
+  const [showUsd, setShowUsd] = useState(false);
   const payroll = summary?.payrollByCurrency ?? [];
   const maxHeadcount = Math.max(...payroll.map((item) => item.employeeCount), 1);
   const countries = [...(summary?.countries ?? [])].sort((a, b) => b.count - a.count);
@@ -19,6 +21,8 @@ export function PayrollOverview({ summary, selectedCountry, onSelectCountry }: P
         <p className="section-kicker">Compensation</p>
         <h2 id="payroll-title" className="mt-1 text-xl font-semibold">Payroll by currency</h2>
         <p className="mt-1 text-xs text-[#65726a]">Totals stay in local currency; bars show headcount paid in each.</p>
+        <label className="mt-3 flex items-center gap-2 text-xs text-[#526157]"><input type="checkbox" checked={showUsd} onChange={(event) => setShowUsd(event.target.checked)} />Show combined payroll in USD</label>
+        {showUsd && <div className="mt-3 border-l-4 border-[#397553] bg-white px-3 py-2"><div className="text-xs text-[#65726a]">Illustrative USD conversion</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatMoney(summary?.payrollInUsd ?? 0, 'USD')}</div><p className="text-[11px] text-[#758078]">Static multipliers by source currency (EUR ×1.08, GBP ×1.27, INR ×0.012); comparison only, not a payroll or accounting figure.</p></div>}
       </div>
       {payroll.length ? (
         <div className="divide-y divide-[#d7ded7] border-y border-[#d7ded7]">

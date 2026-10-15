@@ -179,6 +179,8 @@ describe('HR-manager authentication and authorization', () => {
     await request(app.getHttpServer()).get('/api').expect(401);
     await request(app.getHttpServer()).get('/api/dashboard/summary').expect(401);
     await request(app.getHttpServer()).get('/api/employees/analytics').expect(401);
+    await request(app.getHttpServer()).get('/api/employees/outliers').expect(401);
+    await request(app.getHttpServer()).post('/api/employees').send({}).expect(401);
   });
 
   it('enforces the HR-manager role on protected routes', async () => {
@@ -269,6 +271,19 @@ describe('CSV export', () => {
 });
 
 describe('request validation', () => {
+  it('rejects malformed roster creation and unapproved analytics dimensions', async () => {
+    const cookie = await loginCookie();
+    await request(app.getHttpServer())
+      .post('/api/employees')
+      .set('Cookie', cookie)
+      .send({ employeeCode: 'not-an-acme-code' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/employees/analytics?dimension=passwordHash')
+      .set('Cookie', cookie)
+      .expect(400);
+  });
+
   it.each([
     ['a timestamp instead of a date', { ...salaryChange, effectiveDate: '2025-02-01T10:00:00Z' }],
     ['an impossible date', { ...salaryChange, effectiveDate: '2025-02-30' }],

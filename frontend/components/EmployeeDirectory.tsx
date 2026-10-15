@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, History, Pencil, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, History, Pencil, Search, UserRoundX, Wallet, UserPlus } from 'lucide-react';
 import { ReactNode } from 'react';
 import { formatMoney } from '@/lib/format';
 import { CURRENCIES, DashboardSummary, Employee, LEVEL_LABELS, SortField } from '@/lib/types';
@@ -9,11 +9,13 @@ import { useDirectory } from '@/lib/useDirectory';
 type Props = {
   directory: ReturnType<typeof useDirectory>;
   summary: DashboardSummary | null;
-  onEdit: (employee: Employee) => void;
+  onEditProfile: (employee: Employee | null) => void;
+  onSalaryEdit: (employee: Employee) => void;
   onHistory: (employee: Employee) => void;
+  onDeactivate: (employee: Employee) => void;
 };
 
-export function EmployeeDirectory({ directory, summary, onEdit, onHistory }: Props) {
+export function EmployeeDirectory({ directory, summary, onEditProfile, onSalaryEdit, onHistory, onDeactivate }: Props) {
   const { filters, setFilter, sort, toggleSort, page, setPage, hasCurrency, result, loading } = directory;
   const from = result && result.total > 0 ? (result.page - 1) * result.limit + 1 : 0;
   const to = result ? Math.min(result.page * result.limit, result.total) : 0;
@@ -42,7 +44,7 @@ export function EmployeeDirectory({ directory, summary, onEdit, onHistory }: Pro
           <p className="section-kicker">People directory</p>
           <h2 id="directory-title" className="mt-1 text-xl font-semibold">Employee records</h2>
         </div>
-        <span className="text-xs text-[#65726a]">Salaries shown in each employee&apos;s currency</span>
+        <div className="flex items-center gap-3"><span className="text-xs text-[#65726a]">Salaries shown in each employee&apos;s currency</span><button className="primary-button inline-flex items-center gap-2" onClick={() => onEditProfile(null)}><UserPlus size={15} />Add employee</button></div>
       </div>
 
       <div className="mb-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -104,7 +106,9 @@ export function EmployeeDirectory({ directory, summary, onEdit, onHistory }: Pro
                 <td className="px-3 py-3">
                   <div className="flex justify-end gap-1.5">
                     <button className="icon-button" title={`Salary history for ${employee.fullName}`} aria-label={`Salary history for ${employee.fullName}`} onClick={() => onHistory(employee)}><History size={15} /></button>
-                    <button className="icon-button" title={`Edit salary for ${employee.fullName}`} aria-label={`Edit salary for ${employee.fullName}`} onClick={() => onEdit(employee)}><Pencil size={15} /></button>
+                    <button className="icon-button" title={`Edit employee ${employee.fullName}`} aria-label={`Edit employee ${employee.fullName}`} onClick={() => onEditProfile(employee)}><Pencil size={15} /></button>
+                    <button className="icon-button" title={`Edit salary for ${employee.fullName}`} aria-label={`Edit salary for ${employee.fullName}`} onClick={() => onSalaryEdit(employee)}><Wallet size={15} /></button>
+                    <button className="icon-button" title={`Deactivate ${employee.fullName}`} aria-label={`Deactivate ${employee.fullName}`} onClick={() => onDeactivate(employee)}><UserRoundX size={15} /></button>
                   </div>
                 </td>
               </tr>
