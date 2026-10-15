@@ -153,6 +153,7 @@ export class EmployeesService {
   async createEmployee(payload: CreateEmployeeDto) {
     const hireDate = new Date(`${payload.hireDate}T00:00:00.000Z`);
     const effectiveDate = new Date(`${payload.effectiveDate}T00:00:00.000Z`);
+    this.assertEffectiveDateOnOrAfterHireDate(effectiveDate, hireDate);
     this.assertValidEffectiveDate(effectiveDate, effectiveDate);
     const salary = new Prisma.Decimal(payload.salary);
     const employee = await this.prisma.$transaction(async (transaction) => {
@@ -181,6 +182,10 @@ export class EmployeesService {
 
   async updateEmployee(id: number, payload: UpdateEmployeeDto) {
     if (Object.keys(payload).length === 0) throw new BadRequestException('Provide at least one profile field to update.');
+    const existing = await this.prisma.employee.findUnique({ where: { id } });
+    if (!existing?.isActive) throw new NotFoundException(`Employee ${id} not found`);
+    const hireDate = payload.hireDate ? new Date(`${payload.hireDate}T00:00:00.000Z`) : existing.hireDate;
+    this.assertEffectiveDateOnOrAfterHireDate(existing.effectiveDate, hireDate);
     const data: Prisma.EmployeeUpdateManyMutationInput = {
       ...(payload.fullName !== undefined ? { fullName: payload.fullName } : {}),
       ...(payload.department !== undefined ? { department: payload.department } : {}),
@@ -251,10 +256,11 @@ export class EmployeesService {
 
     const updated = await this.prisma.$transaction(async (transaction) => {
       const [current] = await transaction.$queryRaw<
-        { salary: Prisma.Decimal; currency: PrismaCurrency; effectiveDate: Date; isActive: boolean }[]
-      >(Prisma.sql`SELECT "salary", "currency", "effectiveDate", "isActive" FROM "Employee" WHERE "id" = ${id} FOR UPDATE`);
+        { salary: Prisma.Decimal; currency: PrismaCurrency; effectiveDate: Date; hireDate: Date; isActive: boolean }[]
+      >(Prisma.sql`SELECT "salary", "currency", "effectiveDate", "hireDate", "isActive" FROM "Employee" WHERE "id" = ${id} FOR UPDATE`);
       if (!current?.isActive) throw new NotFoundException(`Employee ${id} not found`);
 
+      this.assertEffectiveDateOnOrAfterHireDate(effectiveDate, current.hireDate);
       this.assertValidEffectiveDate(effectiveDate, current.effectiveDate);
       this.assertChangeConfirmed(Number(current.salary), payload.salary, payload.confirmLargeChange);
 
@@ -409,6 +415,12 @@ export class EmployeesService {
       throw new BadRequestException(
         `Effective date must be on or after the current salary's effective date (${this.dateOnly(currentEffectiveDate)}).`,
       );
+    }
+  }
+
+  private assertEffectiveDateOnOrAfterHireDate(effectiveDate: Date, hireDate: Date) {
+    if (effectiveDate.getTime() < hireDate.getTime()) {
+      throw new BadRequestException('Salary effective date cannot be before the employee hire date.');
     }
   }
 

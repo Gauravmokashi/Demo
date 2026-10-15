@@ -26,6 +26,7 @@ function createService() {
         salary: databaseEmployee.salary,
         currency: databaseEmployee.currency,
         effectiveDate: databaseEmployee.effectiveDate,
+        hireDate: databaseEmployee.hireDate,
         isActive: true,
       },
     ]),
@@ -248,6 +249,15 @@ describe('EmployeesService', () => {
       expect(transaction.employee.update).not.toHaveBeenCalled();
     });
 
+    it('rejects a salary effective date before the hire date', async () => {
+      const { service, transaction } = createService();
+
+      await expect(
+        service.updateSalary(1, { ...validChange, effectiveDate: '2020-06-14' }, 42),
+      ).rejects.toThrow(/before the employee hire date/);
+      expect(transaction.employee.update).not.toHaveBeenCalled();
+    });
+
     it('requires confirmation for changes above 20%', async () => {
       const { service, transaction } = createService();
 
@@ -381,6 +391,20 @@ describe('EmployeesService', () => {
       const { service, transaction } = createService();
       await expect(service.createEmployee({ ...newEmployee, effectiveDate: '2999-01-01' })).rejects.toThrow(/cannot be in the future/);
       expect(transaction.employee.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an opening salary effective date before the hire date', async () => {
+      const { service, transaction } = createService();
+      await expect(service.createEmployee({ ...newEmployee, effectiveDate: '2024-12-31' })).rejects.toThrow(/before the employee hire date/);
+      expect(transaction.employee.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a profile hire date after the current salary effective date', async () => {
+      const { service, prisma } = createService();
+      prisma.employee.findUnique.mockResolvedValue(databaseEmployee);
+
+      await expect(service.updateEmployee(1, { hireDate: '2025-01-02' })).rejects.toThrow(/before the employee hire date/);
+      expect(prisma.employee.updateMany).not.toHaveBeenCalled();
     });
 
     it('updates profile fields without changing compensation', async () => {

@@ -1,59 +1,182 @@
-# How I Used AI
+# AI Use and Development Log
 
-AI was used for planning, documentation and implementation support. The notes below distinguish the original author-reported use of Claude from the Codex work recorded in this project-completion session.
+## 1. Overview
 
-## Tools
-- **Claude (chat):** assignment breakdown, stack comparison, review of my project documentation, and first drafts of the docs and SQL under `docs/`.
-- **OpenAI Codex:** reviewed the repository against the assessment and implemented employee roster create/edit/deactivate, job-title analytics, peer outlier reporting, illustrative USD payroll comparison, related tests, and documentation updates in this session.
+I used Claude and OpenAI Codex to assist with implementation, code review, debugging, testing, and documentation for the ACME Salary Management application.
 
-## Workflow
+The goal was to build a web application that enables an HR manager to manage 10,000 employees, maintain salary history, and understand compensation distribution across countries and currencies.
 
-1. **Understanding the brief.** I shared the assessment document and asked for a breakdown of what was being evaluated. The main takeaway was that the persona (an HR manager) needs to *answer questions about how the org pays people*, so analytics matter as much as CRUD.
-2. **Choosing the stack.** The project uses NestJS, Next.js, Prisma and PostgreSQL. The recorded decisions explain the relational model, PostgreSQL percentile queries and separate API/UI boundary.
-3. **Reviewing my own work against the brief.** I shared my technical documentation and asked what to improve for an interview submission. The review found real gaps, listed below.
-4. **Closing the gaps.** The repository includes requirements and design notes. Codex checked the proposed insights against the current Prisma schema, then implemented the missing roster and pay-insight paths instead of leaving SQL sketches as future work.
-5. **Implementation and tests.** Codex updated the API, UI, schema migration, unit tests, PostgreSQL integration tests and component tests. The tests were added but were not run during this session; the CI workflow is configured to run lint, tests, migrations, a 10,000-row seed and build.
+AI was used as a development assistant, not as the final authority. I reviewed the proposed implementation against the application requirements, database schema, API behavior, and test code. I made the final decisions on feature scope, architecture, trade-offs, and acceptance criteria.
 
-## Prompts I used
+**Prompt provenance:** The prompts below are reconstructed examples organized around the project's implementation stages. The original implementation prompt history was not retained, so these examples must not be interpreted as verbatim historical prompts.
 
-### Prompt 1: Choosing the stack
-```
-which stack is perfect for this project?
-```
-**Result:** A recommended stack with reasons and alternatives I should reject (NestJS as heavy, Postgres as extra setup, and so on).
-**What I changed:** Chose the stack now present in the repository and recorded its trade-offs in `docs/DECISIONS.md`.
+## 2. AI-Assisted Development Workflow
 
-### Prompt 2: Honest rating of the approach
-```
-what will you rate if build by above stack. out of 10?
-```
-**Result:** A rating of about 8.5/10 for the stack, with the explanation that the stack decides only part of the grade and the rest is execution: requirements, insights, tests, commits and deployment.
-**What I changed:** Treated the rating as feedback about the stack, then focused the implementation on the assessment's end-to-end functionality and evidence.
+### Stage 1 — Review the existing implementation and assessment
 
-### Prompt 3: Reviewing my own documentation
-```
-[attached my technical documentation] is there anything needs to be change?
-considering interview assignment what needs to improve? how much you will rate this?
-```
-**Result:** About 6.5/10 with a concrete list of gaps: no one-page requirements doc, no deployment, thin insights (only count/sum/average), no employee create/edit, no cross-currency comparison, and no documentation of AI usage. It also flagged a contradiction in my doc about CSV formula protection, unused dependencies, `--legacy-peer-deps`, and tests that only use mocked Prisma.
-**What I changed:** Added the requirements and design records, deployment instructions, PostgreSQL integration coverage, and this AI-use record. The completion work in this session added employee lifecycle routes, job-title analytics, peer outliers, static USD comparison and corresponding tests.
+**Objective:** Identify gaps between the application and the interview assignment.
 
-### Prompt 4: Requirements first
-```
-1st requirements doc
-```
-**Result:** A one-page requirements doc (goal, features in scope, what is deliberately left out and why, trade-offs, success criteria).
-**What I changed:** Kept the original product goal and documented explicit exclusions such as payroll execution, live FX rates, bulk import and approval workflows.
+**Reconstructed prompt:**
 
-## Where AI needed correction or care
-- The earlier review was based on documentation. Codex then inspected the implementation and found that the SQL notes described job-title analytics, outliers and FX before those features existed. The implementation now uses the actual Prisma schema and a migration; the test suite was extended, but was not executed in this session.
-- Static FX values are illustrative only. The stored salary and currency are not converted, and the UI labels the USD total accordingly.
+> Review the existing salary management application against the assessment requirements. Inspect the source code, database schema, API endpoints, UI, tests, and documentation. Identify missing features, implementation risks, unsupported claims, and the highest-priority improvements. Separate confirmed findings from assumptions. Do not recommend adding complexity without a clear product or engineering benefit.
 
-## What I did not delegate
-- Scope: which features to build and which to leave out, and the reasoning for each.
-- Security and operational trade-offs (JWT cookie auth, no rate limiting, static FX rates).
-- The implementation keeps salary edits separate from profile edits so salary changes continue to require a reason and create both history and audit rows.
+**AI contribution:** Helped identify gaps in employee lifecycle management, compensation insights, testing, documentation, and submission readiness.
 
-## How I kept quality high
-- The repository has incremental commits and a CI workflow for lint, unit/component tests, PostgreSQL integration tests, a 10,000-employee seed and build. This session's test cases were added but not run; the local dependencies are not installed.
-- No `EXPLAIN ANALYZE` timings or live deployment are claimed in this record.
+**Engineering decision:** Prioritized features directly related to the HR manager's workflow and avoided expanding the application into a full payroll or HR platform.
+
+### Stage 2 — Establish application architecture
+
+**Objective:** Organize the frontend, backend, database, and development workflow.
+
+**Reconstructed prompt:**
+
+> Review the existing project structure and recommend a maintainable architecture for a salary management application supporting 10,000 employees. Use the existing React/Next.js frontend, NestJS backend, Prisma ORM, and PostgreSQL database where appropriate. Keep responsibilities separated, validate API inputs, use database constraints for integrity, and avoid unnecessary abstraction. Explain the trade-offs before suggesting structural changes.
+
+**AI contribution:** Assisted with architecture review, module boundaries, API organization, database access patterns, and maintainability improvements.
+
+**Engineering decision:** Retained a relational database for structured employee and salary data, database-backed filtering and analytics, and a separate frontend/backend structure.
+
+### Stage 3 — Employee data model and seed generation
+
+**Objective:** Support a realistic dataset of 10,000 employees.
+
+**Reconstructed prompt:**
+
+> Review the Prisma schema and employee seed implementation. Ensure the data model supports employee identity, job title, department, country, employment status, salary amount, currency, and salary history as required by the existing application. Generate 10,000 deterministic synthetic employees using a fixed seed, valid relationships, realistic distributions, and batched database inserts. Make the seed safe to rerun and report any assumptions or limitations.
+
+**AI contribution:** Assisted with schema review, deterministic synthetic-data generation, seed validation, and database setup documentation.
+
+**Engineering decision:** Used synthetic employee data rather than real personal or compensation records. Kept salary amounts associated with their currencies instead of treating all monetary values as directly comparable.
+
+### Stage 4 — Authentication and authorization
+
+**Objective:** Protect HR management functionality.
+
+**Reconstructed prompt:**
+
+> Review the existing NestJS authentication implementation. Check password hashing, credential validation, JWT handling, cookie settings, current-user validation, role guards, and authorization on protected endpoints. Identify concrete security weaknesses and recommend minimal, maintainable fixes. Do not claim production security without evidence.
+
+**AI contribution:** Assisted with security review and validation of authentication and authorization behavior.
+
+**Engineering decision:** Retained the implemented authentication controls and documented security features that remain outside scope, including SSO, password reset, login rate limiting, and server-side token revocation.
+
+### Stage 5 — Employee management APIs
+
+**Objective:** Implement the employee lifecycle.
+
+**Reconstructed prompt:**
+
+> Review the employee API and service layer. Implement or improve employee creation, profile editing, deactivation, search, filtering, sorting, and pagination according to the existing schema and requirements. Validate request inputs, use an allowlist for sortable fields, enforce reasonable page-size limits, and handle missing records and duplicate employee identifiers. Keep database operations efficient for 10,000 employees and add tests for success and failure cases.
+
+**AI contribution:** Assisted with service implementation, DTO validation, query handling, error cases, and corresponding tests.
+
+**Engineering decision:** Kept profile editing separate from salary changes and used database-side filtering and pagination rather than loading all employees into application memory.
+
+### Stage 6 — Salary changes and audit history
+
+**Objective:** Preserve salary-change traceability and data integrity.
+
+**Reconstructed prompt:**
+
+> Review the salary update workflow. Ensure that a salary change validates the amount, currency, effective date, and required reason according to the existing business rules. Preserve salary history and audit attribution. Use a database transaction so the salary update, history entry, and audit record succeed or fail together. Review concurrent-update behavior and add tests for validation failures and transaction-related cases. Do not silently overwrite historical salary records.
+
+**AI contribution:** Assisted with transaction review, salary-history handling, audit logging, validation, and test design.
+
+**Engineering decision:** Used transactional writes and employee-row locking in the salary-update path. Kept salary changes auditable instead of treating compensation as an ordinary profile field.
+
+### Stage 7 — Compensation insights
+
+**Objective:** Help HR answer questions about how the organization pays employees.
+
+**Reconstructed prompt:**
+
+> Review the existing compensation analytics implementation. Support grouping by the available organizational dimensions, with compensation statistics including employee count, minimum, maximum, average, median, P25, and P75 where implemented. Preserve currency separation and validate grouping and filtering inputs. Review the peer-group outlier logic, minimum peer-group size, and configurable thresholds. Use database-side aggregation where appropriate and add deterministic tests for edge cases.
+
+**AI contribution:** Assisted with analytics query review, percentile calculations, grouping rules, outlier logic, and related tests and documentation.
+
+**Engineering decision:** Kept analytics database-backed, separated currencies, and compared employees within the implemented peer-group dimensions. Treated outlier thresholds as configurable defaults rather than established HR policy.
+
+### Stage 8 — Currency comparison and CSV export
+
+**Objective:** Provide useful reporting without misleading HR users.
+
+**Reconstructed prompt:**
+
+> Review the compensation comparison and CSV export features. Verify that monetary values retain their original currency and that any USD-normalized comparison clearly identifies the conversion assumptions. Check CSV handling for formula injection and ensure exported data follows the same filters and access rules as the relevant API. Add tests for special characters, empty values, and edge cases.
+
+**AI contribution:** Assisted with export-safety review, comparison behavior, and documentation of limitations.
+
+**Engineering decision:** Kept static FX rates illustrative rather than presenting them as live market or accounting rates. Treated CSV formula-injection protection as a security requirement.
+
+### Stage 9 — Frontend implementation and integration
+
+**Objective:** Connect the HR workflows to a usable interface.
+
+**Reconstructed prompt:**
+
+> Review the Next.js frontend against the implemented backend API. Ensure the employee directory supports the available search, filtering, sorting, and pagination behavior. Review employee create/edit/deactivate flows, salary-change forms, validation feedback, salary history, compensation insights, and CSV export. Handle loading, empty, error, and unauthorized states. Avoid duplicating business rules in the UI when the backend must enforce them.
+
+**AI contribution:** Assisted with component implementation, API integration, form validation, user feedback, and frontend test coverage.
+
+**Engineering decision:** Kept authoritative validation and business rules in the backend, using the frontend to present the workflows and communicate API responses.
+
+### Stage 10 — Testing and debugging
+
+**Objective:** Improve correctness without confusing test presence with verified behavior.
+
+**Reconstructed prompt:**
+
+> Review the existing tests and identify missing high-value cases for authentication, employee lifecycle operations, salary updates, history and audit integrity, CSV export, seed generation, and compensation analytics. Prefer fast, deterministic unit tests with mocks where appropriate. Keep database integration tests separate. Do not change expected results merely to make tests pass. Explain what each test proves and what remains unverified.
+
+**AI contribution:** Assisted with identifying test gaps, adding test cases, debugging implementation issues, and reviewing expected behavior.
+
+**Engineering decision:** Distinguished unit-test coverage from database integration, browser-level end-to-end testing, and performance benchmarking. Test files alone were not treated as evidence of successful execution.
+
+### Stage 11 — Documentation and final review
+
+**Objective:** Align documentation with the actual implementation.
+
+**Reconstructed prompt:**
+
+> Audit the README and project documentation against the current source code, Prisma schema, API routes, test files, scripts, and Git history. Identify contradictory statements, planned features described as implemented, unsupported performance or security claims, and incorrect setup commands. Keep the requirements brief concise, explain deliberate exclusions, and document unverified items honestly. Do not invent test results, deployment URLs, benchmark measurements, or historical prompts.
+
+**AI contribution:** Assisted with documentation review, consistency checks, architecture explanations, setup instructions, and identifying unsupported claims.
+
+**Engineering decision:** Preserved the actual development chronology: the requirements document was written retrospectively, after the initial working application. Deployment and demo recording remain outstanding; a local benchmark is recorded in `DECISIONS.md`.
+
+## 3. Verification and Evidence
+
+AI-generated suggestions were reviewed against the implementation and available tests. The following evidence must be interpreted according to the exact revision being examined.
+
+| Check | Recorded status |
+|---|---|
+| Source and schema review | Performed during development and documentation review |
+| Test suite | An attempted `npm test` run stopped because Jest was unavailable in the environment |
+| Build and lint | Not verified for the exact uncommitted snapshot |
+| PostgreSQL integration tests | Not verified for the exact uncommitted snapshot |
+| Local API performance | Benchmarked over 50 requests per endpoint against 10,002 employee rows; details in `DECISIONS.md`. Not an exact 10,000-row snapshot or production benchmark. |
+| Deployment and demo recording | Not included in the reviewed snapshot |
+
+The reviewed working tree contained uncommitted changes based on commit `283c022f691e9ee09a7d0f063767a062dded64d8`. Therefore, the recorded checks do not establish that the complete final working tree passed.
+
+A successful CI run for a committed revision is evidence for that revision only; it must not be generalized to later uncommitted changes.
+
+## 4. What I Deliberately Did Not Delegate to AI
+
+- Final product scope and prioritization.
+- Acceptance of architectural and data-integrity trade-offs.
+- Decisions about currency interpretation and compensation policy.
+- Approval of security and performance claims.
+- Interpretation of test results and readiness for submission.
+
+AI accelerated implementation and review, but the application was not considered correct simply because AI suggested a solution or generated a test.
+
+## 5. Known Limitations
+
+The reviewed submission does not include a live deployment URL or recorded demo. Live FX integration, payroll execution, SSO, password reset, login rate limiting, and server-side token revocation are outside the current scope.
+
+Refer to [DECISIONS.md](DECISIONS.md) for architectural trade-offs and performance status.
+
+## 6. Summary
+
+The intended workflow was to use AI to accelerate implementation and review while retaining responsibility for engineering decisions and verification. The most important principle was to treat AI output as a proposal, validate it against the actual system, and document limitations instead of overstating completion or correctness.

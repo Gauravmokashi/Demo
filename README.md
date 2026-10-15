@@ -11,13 +11,28 @@ and to answer "how do we pay people?" without spreadsheets.
 
 | Read this | For |
 |---|---|
-| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Goal, scope, and what is deliberately left out |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture, trade-offs, performance, testing strategy |
-| [docs/AI_USAGE.md](docs/AI_USAGE.md) | How AI tools were used and checked |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | Product goal, scope, assumptions, exclusions, and acceptance criteria |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Why the architecture and technical trade-offs were selected |
+| [docs/AI_USAGE.md](docs/AI_USAGE.md) | AI-assisted work, engineering decisions, and verification record |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deploying API, frontend and database |
-| [docs/INSIGHTS_QUERIES.md](docs/INSIGHTS_QUERIES.md) | Analytics behavior and peer outlier rules |
+| [docs/INSIGHTS_QUERIES.md](docs/INSIGHTS_QUERIES.md) | Analytics SQL, grouping rules, peer logic, and query verification |
+| [docs/PROCESS.md](docs/PROCESS.md) | Project delivery workflow |
 
 **Stack:** NestJS 10 · Prisma 6 · PostgreSQL 16 · Next.js 16 · React 19 · Radix UI · Tailwind · Jest.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  HR[HR manager browser] -->|same-origin UI| UI[Next.js frontend]
+  UI -->|/api proxy, session cookie| API[NestJS REST API]
+  API -->|Prisma and SQL| DB[(PostgreSQL)]
+  API -->|salary history and audit writes| DB
+  CI[GitHub Actions] -->|lint, tests, migration, seed, build| API
+  CI --> DB
+```
+
+The browser talks to the Next.js app; its `/api` proxy forwards authenticated requests to NestJS. PostgreSQL stores the roster, salary history and audit trail. See [the project delivery notes](docs/PROCESS.md) for the delivery workflow.
 
 ## Run locally
 
@@ -50,13 +65,36 @@ npm test          # backend unit + HTTP tests, seed-generator tests, frontend co
 npm run build
 ```
 
-Integration tests run against a real, migrated PostgreSQL database (CI does this on every push). Use a
+To generate HTML coverage reports, run Jest from each workspace:
+
+```powershell
+Push-Location backend
+npx jest --runInBand --coverage
+Pop-Location
+
+Push-Location frontend
+npx jest --runInBand --coverage
+Pop-Location
+```
+
+Open `backend/coverage/lcov-report/index.html` and `frontend/coverage/lcov-report/index.html`. These generated reports are ignored by Git.
+
+Integration tests run against a real, migrated PostgreSQL database (CI runs them on pushes to `main` and on pull requests). Use a
 disposable database — the tests truncate tables:
 
 ```bash
 docker compose exec postgres createdb -U salary_app salary_test
-DATABASE_URL="postgresql://salary_app:salary_app@localhost:5432/salary_test?schema=public" npm run db:deploy --workspace backend
-DATABASE_URL="postgresql://salary_app:salary_app@localhost:5432/salary_test?schema=public" npm run test:int --workspace backend
+DATABASE_URL="postgresql://salary_app:salary_app@localhost:5433/salary_test?schema=public" npm run db:deploy --workspace backend
+DATABASE_URL="postgresql://salary_app:salary_app@localhost:5433/salary_test?schema=public" npm run test:int --workspace backend
+```
+
+The Docker Compose database is published on host port `5433` (container port `5432`). In PowerShell, set the test database URL for each command like this:
+
+```powershell
+$env:DATABASE_URL = "postgresql://salary_app:salary_app@localhost:5433/salary_test?schema=public"
+npm run db:deploy --workspace backend
+npm run test:int --workspace backend
+Remove-Item Env:DATABASE_URL
 ```
 
 ## API
@@ -70,15 +108,16 @@ HR-manager session cookie.
 | `GET health` | Readiness; 503 when the database is unreachable |
 | `GET dashboard/summary` | Active headcount, payroll and average per currency, illustrative total in USD, countries, departments, levels |
 | `GET employees` | `page, limit, search, country, department, level, currency, minSalary, maxSalary, sortBy, sortOrder` (salary bounds/sort need `currency`) |
+| `GET employees/options` | Active countries, departments and job titles for employee roster forms |
 | `POST employees` | Create a roster record and its opening salary-history row |
-| `PATCH employees/:id` · `DELETE employees/:id` | Edit profile fields or soft-deactivate a record; salary and currency remain on their audited workflow |
+| `PATCH employees/:id` · `DELETE employees/:id` | Edit profile fields or soft-deactivate a record; profile edits cannot change salary or currency, and salary changes use the audited route |
 | `GET employees/export` | CSV of every row matching the same filters |
-| `GET employees/analytics` | `dimension=country\|department\|level\|jobTitle`, optional `country, department, currency` → count, min, P25, median, P75, max, average, total per group and currency |
-| `GET employees/outliers` | Salaries outside 0.6×–1.5× of a peer median, for groups of at least five |
+| `GET employees/analytics` | Salary statistics by country, department, level or job title, grouped by currency; see [analytics notes](docs/INSIGHTS_QUERIES.md) for calculation and grouping rules |
+| `GET employees/outliers` | Peer salary outliers; see [analytics notes](docs/INSIGHTS_QUERIES.md) for peer definitions and thresholds |
 | `GET employees/:id` · `GET employees/:id/history` | Employee, salary timeline and attributed changes |
 | `PATCH employees/:id/salary` | `{ salary, effectiveDate: "YYYY-MM-DD", reason, confirmLargeChange? }` |
 
-Invalid input returns 400 with a message (including database range errors), never a 500. Deactivated employees are excluded from the directory, payroll totals, analytics and export; their salary history stays available in the database.
+Request validation errors and recognized database input/range errors return 400 responses. Deactivated employees are excluded from the directory, payroll totals, analytics, outliers and export; their salary history remains available through the history endpoint.
 
 ## Assessment delivery
 

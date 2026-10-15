@@ -16,9 +16,11 @@ SELECT
   "currency",
   COUNT(*)::int                                               AS "headcount",
   MIN("salary")                                               AS "min",
+  percentile_cont(0.25) WITHIN GROUP (ORDER BY "salary")      AS "p25",
   percentile_cont(0.5)  WITHIN GROUP (ORDER BY "salary")      AS "median",
+  percentile_cont(0.75) WITHIN GROUP (ORDER BY "salary")      AS "p75",
   AVG("salary")                                               AS "avg",
-  percentile_cont(0.9)  WITHIN GROUP (ORDER BY "salary")      AS "p90",
+  SUM("salary")                                               AS "total",
   MAX("salary")                                               AS "max"
 FROM "Employee"
 WHERE "isActive" = true
@@ -26,7 +28,7 @@ GROUP BY "country", "currency"
 ORDER BY "country", "currency";
 ```
 
-The API also supports `department`, `level` and `jobTitle`. It validates the dimension and chooses its SQL identifier from a fixed whitelist.
+The API also supports `department`, `level` and `jobTitle`. It validates the dimension and chooses its SQL identifier from a fixed whitelist. Optional country, department and currency filters can narrow the active employee set. The UI displays the middle 50% as P25–P75.
 
 ## 3. Outliers (paid far from the peer median)
 
@@ -57,7 +59,7 @@ LIMIT 100;
 
 ## 4. Payroll total in USD (explicit conversion)
 
-The implementation multiplies local salaries by fixed USD comparison rates: USD 1.00, EUR 1.08, GBP 1.27 and INR 0.012. It never changes stored salaries.
+The backend groups payroll by currency, then multiplies those totals by fixed USD comparison rates: USD 1.00, EUR 1.08, GBP 1.27 and INR 0.012. The SQL below shows the equivalent calculation over employee rows; the shipped code applies the rates to the four grouped totals. It never changes stored salaries.
 
 ```sql
 SELECT SUM("salary" * r.rate) AS "payrollUsd"
@@ -100,8 +102,11 @@ export class InsightsService {
       SELECT ${col} AS "group", "currency",
              COUNT(*)::int AS "headcount",
              MIN("salary")::float AS "min",
+             percentile_cont(0.25) WITHIN GROUP (ORDER BY "salary")::float AS "p25",
              percentile_cont(0.5) WITHIN GROUP (ORDER BY "salary")::float AS "median",
+             percentile_cont(0.75) WITHIN GROUP (ORDER BY "salary")::float AS "p75",
              AVG("salary")::float AS "avg",
+             SUM("salary")::float AS "total",
              MAX("salary")::float AS "max"
       FROM "Employee"
       WHERE "isActive" = true
@@ -119,9 +124,9 @@ The corresponding DTO validates all four dimensions before the service uses the 
 - Plant high and low salaries; verify outlier thresholds and the five-person minimum.
 - Verify unsupported dimensions return 400.
 
-These checks live in `backend/test/employees.int-spec.ts` and run in CI with PostgreSQL 16.
+These checks live in `backend/test/employees.int-spec.ts` and run in CI with PostgreSQL 16. The suite also covers lifecycle and salary transactions. Directory search/filters and CSV export are covered by mocked service tests, not by this integration suite.
 
 ## 7. Performance
 
-- No `EXPLAIN ANALYZE` timings are recorded yet; measure them on the seeded 10,000-row database before claiming a latency target.
+- Use `EXPLAIN ANALYZE` on the seeded employee dataset before proposing indexes or caching; do not infer latency from query structure alone.
 - The peer-group index on `("jobTitle", "country", "currency")` is included in the migration. Consider caching only if measured query times show it is needed.
