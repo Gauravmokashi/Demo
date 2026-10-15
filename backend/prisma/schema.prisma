@@ -93,4 +93,3 @@ model SalaryChangeAudit {
   @@index([actorUserId, changedAt])
   @@index([employeeId, changedAt])
 }
-
