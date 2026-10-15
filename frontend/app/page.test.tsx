@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import HomePage from './page';
@@ -17,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.restoreAllMocks();
 });
 
 describe('HR salary dashboard', () => {
@@ -73,9 +74,10 @@ describe('HR salary dashboard', () => {
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('Employee ID'), 'ACM-10001');
     await user.type(within(dialog).getByLabelText('Full name'), 'Aarav Patel');
-    await user.type(within(dialog).getByLabelText('Department'), 'Engineering');
-    await user.type(within(dialog).getByLabelText('Country'), 'India');
-    await user.type(within(dialog).getByLabelText('Job title'), 'Software Engineer');
+    await screen.findByRole('option', { name: 'Engineering' });
+    await user.selectOptions(within(dialog).getByLabelText('Department'), 'Engineering');
+    await user.selectOptions(within(dialog).getByLabelText('Country'), 'India');
+    await user.selectOptions(within(dialog).getByLabelText('Job title'), 'Software Engineer');
     fireEvent.change(within(dialog).getByLabelText('Hire date'), { target: { value: '2025-01-10' } });
     await user.type(within(dialog).getByLabelText('Annual salary'), '1800000');
     fireEvent.change(within(dialog).getByLabelText('Salary effective date'), { target: { value: '2025-01-10' } });
@@ -95,8 +97,8 @@ describe('HR salary dashboard', () => {
     const user = await renderAuthenticated();
     await user.click(screen.getByRole('button', { name: 'Edit employee Maya Patel' }));
     const dialog = await screen.findByRole('dialog');
-    await user.clear(within(dialog).getByLabelText('Department'));
-    await user.type(within(dialog).getByLabelText('Department'), 'Product');
+    await screen.findByRole('option', { name: 'Product' });
+    await user.selectOptions(within(dialog).getByLabelText('Department'), 'Product');
     await user.click(within(dialog).getByRole('button', { name: 'Save employee' }));
 
     await screen.findByText('Employee record saved for Maya Patel.');
@@ -171,6 +173,7 @@ describe('HR salary dashboard', () => {
     const user = await renderAuthenticated();
     URL.createObjectURL = () => 'blob:test';
     URL.revokeObjectURL = () => undefined;
+    jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     await user.selectOptions(screen.getByLabelText('Filter by country'), 'India');
     await user.click(screen.getByRole('button', { name: /export csv/i }));

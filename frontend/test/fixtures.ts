@@ -94,6 +94,11 @@ export function installFetch(options: FetchOptions = {}) {
     if (path.endsWith('/auth/refresh')) return jsonResponse({ user: manager }, 200);
     if (path.endsWith('/auth/logout')) return jsonResponse({ message: 'Logged out.' }, 201);
     if (path.endsWith('/dashboard/summary')) return jsonResponse(summary, options.dashboardStatus ?? 200);
+    if (path.endsWith('/employees/options')) return jsonResponse({
+      countries: ['India', 'United States'],
+      departments: ['Engineering', 'Product'],
+      jobTitles: ['Senior Software Engineer', 'Software Engineer'],
+    }, 200);
     if (path.endsWith('/employees/export')) return jsonResponse('csv', 200);
     if (path.endsWith('/employees/analytics')) return jsonResponse(analytics, 200);
     if (path.endsWith('/employees/outliers')) return jsonResponse(outliers, 200);

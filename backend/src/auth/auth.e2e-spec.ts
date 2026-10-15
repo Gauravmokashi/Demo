@@ -39,6 +39,7 @@ const employeeRecord = {
   currency: Currency.INR,
   salary: new Prisma.Decimal('100000.00'),
   effectiveDate: new Date('2025-01-01T00:00:00.000Z'),
+  isActive: true,
 };
 const salaryChange = { salary: 110000, effectiveDate: '2025-02-01', reason: 'Annual review' };
 

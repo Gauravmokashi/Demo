@@ -63,6 +63,19 @@ const CSV_HEADERS = [
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getOptions() {
+    const [countries, departments, jobTitles] = await Promise.all([
+      this.prisma.employee.groupBy({ by: ['country'], where: { isActive: true }, orderBy: { country: 'asc' } }),
+      this.prisma.employee.groupBy({ by: ['department'], where: { isActive: true }, orderBy: { department: 'asc' } }),
+      this.prisma.employee.groupBy({ by: ['jobTitle'], where: { isActive: true }, orderBy: { jobTitle: 'asc' } }),
+    ]);
+    return {
+      countries: countries.map(({ country }) => country),
+      departments: departments.map(({ department }) => department),
+      jobTitles: jobTitles.map(({ jobTitle }) => jobTitle),
+    };
+  }
+
   async getSummary() {
     const [totalEmployees, currencyGroups, countryGroups, departmentGroups] = await Promise.all([
       this.prisma.employee.count({ where: { isActive: true } }),

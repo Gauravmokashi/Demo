@@ -25,6 +25,12 @@ export type Employee = {
   isActive: boolean;
 };
 
+export type EmployeeOptions = {
+  countries: string[];
+  departments: string[];
+  jobTitles: string[];
+};
+
 export type AuthUser = {
   id: number;
   email: string;

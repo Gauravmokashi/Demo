@@ -1,4 +1,4 @@
-﻿generator client {
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -93,3 +93,4 @@ model SalaryChangeAudit {
   @@index([actorUserId, changedAt])
   @@index([employeeId, changedAt])
 }
+

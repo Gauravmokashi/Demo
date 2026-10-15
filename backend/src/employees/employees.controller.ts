@@ -39,6 +39,11 @@ export class EmployeesController {
     return this.employeesService.getAnalytics(query);
   }
 
+  @Get('options')
+  getOptions() {
+    return this.employeesService.getOptions();
+  }
+
   @Get('outliers')
   getOutliers() {
     return this.employeesService.getOutliers();

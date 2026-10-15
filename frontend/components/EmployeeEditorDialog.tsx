@@ -1,8 +1,8 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { apiJson, UnauthorizedError } from '@/lib/api';
-import { CURRENCIES, Employee, LEVEL_LABELS, JobLevel } from '@/lib/types';
+import { CURRENCIES, Employee, EmployeeOptions, LEVEL_LABELS, JobLevel } from '@/lib/types';
 import { Dialog } from './ui/Dialog';
 
 type Props = {
@@ -17,6 +17,21 @@ const inputClass = 'filter-control mt-1 w-full px-3';
 export function EmployeeEditorDialog({ employee, onClose, onSaved, onUnauthorized }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [options, setOptions] = useState<EmployeeOptions>({ countries: [], departments: [], jobTitles: [] });
+  const [loadingOptions, setLoadingOptions] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    apiJson<EmployeeOptions>('/employees/options', { fallbackMessage: 'Employee choices could not be loaded.' })
+      .then((data) => { if (active) setOptions(data); })
+      .catch((reason) => {
+        if (!active) return;
+        if (reason instanceof UnauthorizedError) onUnauthorized();
+        else setError(reason instanceof Error ? reason.message : 'Employee choices could not be loaded.');
+      })
+      .finally(() => { if (active) setLoadingOptions(false); });
+    return () => { active = false; };
+  }, [onUnauthorized]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,10 +61,10 @@ export function EmployeeEditorDialog({ employee, onClose, onSaved, onUnauthorize
         {!employee && <Field name="employeeCode" label="Employee ID" defaultValue="" placeholder="ACM-10001" pattern="ACM-[0-9]{5}" maxLength={24} required />}
         <Field name="fullName" label="Full name" defaultValue={employee?.fullName ?? ''} maxLength={160} required />
         <div className="grid grid-cols-2 gap-3">
-          <Field name="department" label="Department" defaultValue={employee?.department ?? ''} maxLength={100} required />
-          <Field name="country" label="Country" defaultValue={employee?.country ?? ''} maxLength={100} required />
+          <SelectField name="department" label="Department" value={employee?.department ?? ''} options={withCurrent(options.departments, employee?.department)} disabled={loadingOptions} />
+          <SelectField name="country" label="Country" value={employee?.country ?? ''} options={withCurrent(options.countries, employee?.country)} disabled={loadingOptions} />
         </div>
-        <Field name="jobTitle" label="Job title" defaultValue={employee?.jobTitle ?? ''} maxLength={120} required />
+        <SelectField name="jobTitle" label="Job title" value={employee?.jobTitle ?? ''} options={withCurrent(options.jobTitles, employee?.jobTitle)} disabled={loadingOptions} />
         <label className="block text-sm font-medium">Job level
           <select className={inputClass} name="level" defaultValue={employee?.level ?? 'MID'}>
             {(Object.keys(LEVEL_LABELS) as JobLevel[]).map((level) => <option key={level} value={level}>{LEVEL_LABELS[level]}</option>)}
@@ -77,4 +92,17 @@ export function EmployeeEditorDialog({ employee, onClose, onSaved, onUnauthorize
 
 function Field({ name, label, defaultValue, type = 'text', ...props }: { name: string; label: string; defaultValue?: string; type?: string; placeholder?: string; pattern?: string; maxLength?: number; min?: string; max?: string; step?: string; required?: boolean }) {
   return <label className="block text-sm font-medium">{label}<input className={inputClass} name={name} type={type} defaultValue={defaultValue} {...props} /></label>;
+}
+
+function SelectField({ name, label, value, options, disabled }: { name: string; label: string; value: string; options: string[]; disabled: boolean }) {
+  return <label className="block text-sm font-medium">{label}
+    <select className={inputClass} name={name} defaultValue={value} required disabled={disabled}>
+      <option value="" disabled>{disabled ? 'Loading choices…' : 'Select an option'}</option>
+      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+    </select>
+  </label>;
+}
+
+function withCurrent(options: string[], current?: string) {
+  return current && !options.includes(current) ? [...options, current].sort((a, b) => a.localeCompare(b)) : options;
 }

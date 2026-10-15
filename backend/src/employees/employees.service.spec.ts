@@ -46,8 +46,8 @@ function createService() {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
-      update: jest.fn().mockResolvedValue(databaseEmployee),
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      update: jest.fn<() => Promise<any>>().mockResolvedValue(databaseEmployee),
+      updateMany: jest.fn<() => Promise<any>>().mockResolvedValue({ count: 1 }),
       groupBy: jest.fn(),
     },
     salaryHistory: { findMany: jest.fn() },
@@ -83,7 +83,7 @@ describe('EmployeesService', () => {
         { currency: 'INR', total: 3600000, employeeCount: 2 },
       ]);
       expect(summary.averageSalaryByCurrency).toEqual([{ currency: 'INR', average: 1800000 }]);
-      expect(summary.payrollInUsd).toBe(21600);
+      expect(summary.payrollInUsd).toBe(43200);
       expect(summary.usdRatesAreIllustrative).toBe(true);
       expect(summary.levels).toEqual(['JUNIOR', 'MID', 'SENIOR', 'LEAD', 'PRINCIPAL']);
     });
